@@ -301,6 +301,15 @@ class Company(models.Model):
             sequence.save(update_fields=["last_value", "updated_at"])
             return f"C-{sequence.last_value:05d}"
 
+    def get_active_memberships(self):
+        return self.memberships.filter(is_active=True, employment_status="active")
+
+    def active_employee_count(self):
+        return self.get_active_memberships().count()
+
+    def can_use_feature(self, feature_key: str) -> bool:
+        return True     
+
 
 class CompanyMembership(models.Model):
     class Role(models.TextChoices):
@@ -518,11 +527,4 @@ class CompanyMembership(models.Model):
             Company.objects.filter(pk=self.company_id).update(owner_user_id=self.user_id)
             self.company.owner_user_id = self.user_id
 
-    def get_active_memberships(self):
-        return self.memberships.filter(is_active=True, employment_status="active")
-
-    def active_employee_count(self):
-        return self.get_active_memberships().count()
-
-    def can_use_feature(self, feature_key: str) -> bool:
-        return True        
+           
