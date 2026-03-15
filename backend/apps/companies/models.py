@@ -517,3 +517,12 @@ class CompanyMembership(models.Model):
         if self.role == self.Role.OWNER and self.company.owner_user_id != self.user_id:
             Company.objects.filter(pk=self.company_id).update(owner_user_id=self.user_id)
             self.company.owner_user_id = self.user_id
+
+    def get_active_memberships(self):
+        return self.memberships.filter(is_active=True, employment_status="active")
+
+    def active_employee_count(self):
+        return self.get_active_memberships().count()
+
+    def can_use_feature(self, feature_key: str) -> bool:
+        return True        
