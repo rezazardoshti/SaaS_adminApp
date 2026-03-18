@@ -318,7 +318,7 @@ class CompanyMembership(models.Model):
         EMPLOYEE = "employee", "Employee"
 
     class ContractType(models.TextChoices):
-        FULL_TIME = "full_time", "Vollzeit"
+        FULL_TIME = "full_time", "Vollzeit" 
         PART_TIME = "part_time", "Teilzeit"
         MINI_JOB = "mini_job", "Minijob"
         TEMPORARY = "temporary", "Befristet"
