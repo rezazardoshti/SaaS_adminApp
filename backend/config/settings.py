@@ -34,6 +34,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
+    "corsheaders",
+
     "rest_framework",
     "rest_framework.authtoken",
     "django_countries",
@@ -50,6 +53,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+
+    "corsheaders.middleware.CorsMiddleware",
+
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -141,6 +147,21 @@ SIMPLE_JWT = {
     ),
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+
+# -------------------------------------------------
+# CORS / Frontend
+# -------------------------------------------------
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000",
+)
+CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
+
+CSRF_TRUSTED_ORIGINS = env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000",
+)
 
 
 # -------------------------------------------------

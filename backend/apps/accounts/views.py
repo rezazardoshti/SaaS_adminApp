@@ -2,10 +2,10 @@ from django.contrib.auth import get_user_model
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.companies.models import CompanyMembership
 from apps.companies.permissions import get_user_membership_for_company
-
 from .serializers import (
     UserListSerializer,
     UserDetailSerializer,
@@ -13,9 +13,47 @@ from .serializers import (
     UserUpdateSerializer,
     MeSerializer,
     ChangePasswordSerializer,
+    OwnerRegisterSerializer,
 )
 
 User = get_user_model()
+
+
+class OwnerRegisterView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = OwnerRegisterSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        refresh = RefreshToken.for_user(user)
+        company = getattr(user, "registered_company", None)
+
+        return Response(
+            {
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "full_name": user.full_name,
+                    "is_staff": user.is_staff,
+                    "is_superuser": user.is_superuser,
+                    "is_email_verified": user.is_email_verified,
+                },
+                "company": {
+                    "id": company.id,
+                    "company_name": company.company_name,
+                }
+                if company
+                else None,
+                "detail": "Registrierung erfolgreich.",
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MeView(APIView):
@@ -34,7 +72,6 @@ class MeView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-
         response_serializer = MeSerializer(request.user)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -47,7 +84,6 @@ class MeView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-
         response_serializer = MeSerializer(request.user)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -62,7 +98,6 @@ class ChangePasswordView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-
         return Response(
             {"detail": "Passwort wurde erfolgreich geändert."},
             status=status.HTTP_200_OK,
@@ -188,8 +223,7 @@ class UserRetrieveUpdateView(generics.RetrieveUpdateAPIView):
             return super().update(request, *args, **kwargs)
 
         shared_membership = (
-            CompanyMembership.objects
-            .filter(
+            CompanyMembership.objects.filter(
                 user=target_user,
                 is_active=True,
                 company__memberships__user=request.user,
@@ -252,7 +286,6 @@ class UserDeactivateView(APIView):
                     {"detail": "Superuser kann nicht deaktiviert werden."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
             user.is_active = False
             user.save(update_fields=["is_active", "updated_at"])
             return Response(
@@ -261,8 +294,7 @@ class UserDeactivateView(APIView):
             )
 
         shared_membership = (
-            CompanyMembership.objects
-            .filter(
+            CompanyMembership.objects.filter(
                 user=user,
                 is_active=True,
                 company__memberships__user=request.user,
@@ -312,7 +344,6 @@ class UserDeactivateView(APIView):
 
         user.is_active = False
         user.save(update_fields=["is_active", "updated_at"])
-
         return Response(
             {"detail": "Benutzer wurde deaktiviert."},
             status=status.HTTP_200_OK,
@@ -334,8 +365,7 @@ class UserActivateView(APIView):
             )
 
         shared_membership = (
-            CompanyMembership.objects
-            .filter(
+            CompanyMembership.objects.filter(
                 user=user,
                 is_active=True,
                 company__memberships__user=request.user,
@@ -357,7 +387,6 @@ class UserActivateView(APIView):
 
         user.is_active = True
         user.save(update_fields=["is_active", "updated_at"])
-
         return Response(
             {"detail": "Benutzer wurde aktiviert."},
             status=status.HTTP_200_OK,
@@ -380,8 +409,7 @@ class UserDeleteView(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         shared_membership = (
-            CompanyMembership.objects
-            .filter(
+            CompanyMembership.objects.filter(
                 user=user,
                 is_active=True,
                 company__memberships__user=request.user,

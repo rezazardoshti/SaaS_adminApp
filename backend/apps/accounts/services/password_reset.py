@@ -1,3 +1,4 @@
+#apps/accounts/services/password_reset.py
 from urllib.parse import urlencode
 
 from django.conf import settings
