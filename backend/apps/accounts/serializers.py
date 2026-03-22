@@ -1,5 +1,4 @@
 from django.contrib.auth import password_validation
-from django.db import transaction
 from rest_framework import serializers
 
 from apps.companies.models import Company, CompanyMembership
@@ -27,6 +26,8 @@ class UserListSerializer(serializers.ModelSerializer):
 
 class UserDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    country = serializers.SerializerMethodField()
+    country_code = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -45,6 +46,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             "postal_code",
             "city",
             "country",
+            "country_code",
             "emergency_contact_person",
             "emergency_contact_phone",
             "notes",
@@ -69,6 +71,16 @@ class UserDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def get_country(self, obj):
+        if not obj.country:
+            return ""
+        return str(obj.country)
+
+    def get_country_code(self, obj):
+        if not obj.country:
+            return ""
+        return getattr(obj.country, "code", "") or str(obj.country)
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -120,12 +132,22 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("password_confirm")
         password = validated_data.pop("password")
+
+        if "first_name" in validated_data and validated_data["first_name"]:
+            validated_data["first_name"] = validated_data["first_name"].strip()
+
+        if "last_name" in validated_data and validated_data["last_name"]:
+            validated_data["last_name"] = validated_data["last_name"].strip()
+
+        if "phone" in validated_data and validated_data["phone"]:
+            validated_data["phone"] = validated_data["phone"].strip()
+
         user = User.objects.create_user(password=password, **validated_data)
         return user
 
 
 class OwnerRegisterSerializer(serializers.ModelSerializer):
-    company_name = serializers.CharField(max_length=255, write_only=True)
+    company_name = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
 
@@ -150,10 +172,10 @@ class OwnerRegisterSerializer(serializers.ModelSerializer):
         return email
 
     def validate_company_name(self, value):
-        company_name = value.strip()
-        if not company_name:
+        value = value.strip()
+        if not value:
             raise serializers.ValidationError("Firmenname darf nicht leer sein.")
-        return company_name
+        return value
 
     def validate(self, attrs):
         password = attrs.get("password")
@@ -167,14 +189,10 @@ class OwnerRegisterSerializer(serializers.ModelSerializer):
         password_validation.validate_password(password)
         return attrs
 
-    @transaction.atomic
     def create(self, validated_data):
-        company_name = validated_data.pop("company_name").strip()
+        company_name = validated_data.pop("company_name")
         validated_data.pop("password_confirm")
         password = validated_data.pop("password")
-
-        if "email" in validated_data:
-            validated_data["email"] = validated_data["email"].strip().lower()
 
         if "first_name" in validated_data and validated_data["first_name"]:
             validated_data["first_name"] = validated_data["first_name"].strip()
@@ -236,6 +254,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
 class MeSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    country = serializers.SerializerMethodField()
+    country_code = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -253,6 +273,7 @@ class MeSerializer(serializers.ModelSerializer):
             "postal_code",
             "city",
             "country",
+            "country_code",
             "emergency_contact_person",
             "emergency_contact_phone",
             "is_active",
@@ -268,6 +289,16 @@ class MeSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def get_country(self, obj):
+        if not obj.country:
+            return ""
+        return str(obj.country)
+
+    def get_country_code(self, obj):
+        if not obj.country:
+            return ""
+        return getattr(obj.country, "code", "") or str(obj.country)
 
 
 class ChangePasswordSerializer(serializers.Serializer):

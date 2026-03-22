@@ -15,7 +15,6 @@ class MembershipUserSerializer(serializers.ModelSerializer):
             "id",
             "public_id",
             "email",
-            "username",
             "first_name",
             "last_name",
             "full_name",

@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,6 +19,31 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+
+def generate_company_employee_number(company_id: int) -> str:
+    """
+    Format:
+    YY111 -> z. B. 26111 für 2026
+    uniqueness:
+    nur innerhalb einer Firma eindeutig
+    """
+    year_prefix = timezone.now().strftime("%y")
+    prefix = f"{year_prefix}"
+
+    existing_numbers = set(
+        CompanyMembership.objects.filter(
+            company_id=company_id,
+            employee_number__startswith=prefix,
+        ).values_list("employee_number", flat=True)
+    )
+
+    for sequence in range(111, 1000):
+        candidate = f"{prefix}{sequence}"
+        if candidate not in existing_numbers:
+            return candidate
+
+    raise ValueError("Keine freie Personalnummer mehr für dieses Jahr verfügbar.")
 
 
 class OwnerRegisterView(APIView):
@@ -133,6 +160,7 @@ class UserListCreateView(generics.ListCreateAPIView):
             return UserCreateSerializer
         return UserListSerializer
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         if request.user.is_superuser:
             return super().create(request, *args, **kwargs)
@@ -176,15 +204,53 @@ class UserListCreateView(generics.ListCreateAPIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        CompanyMembership.objects.create(
+        try:
+            employee_number = generate_company_employee_number(company_id=int(company_id))
+        except ValueError as exc:
+            user.delete()
+            return Response(
+                {"employee_number": [str(exc)]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        membership = CompanyMembership.objects.create(
             company_id=company_id,
             user=user,
             role=role,
+            employee_number=employee_number,
+            job_title=request.data.get("job_title", ""),
+            department=request.data.get("department", ""),
+            contract_type=request.data.get("contract_type") or CompanyMembership.ContractType.FULL_TIME,
+            employment_status=request.data.get("employment_status") or CompanyMembership.EmploymentStatus.ACTIVE,
+            entry_date=request.data.get("entry_date") or None,
+            vacation_days_per_year=request.data.get("vacation_days_per_year") or 0,
+            is_time_tracking_enabled=request.data.get("is_time_tracking_enabled", True),
+            can_manage_projects=request.data.get("can_manage_projects", False),
             is_active=True,
         )
 
-        response_serializer = UserDetailSerializer(user)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "detail": "Benutzer wurde erfolgreich angelegt.",
+                "user": UserDetailSerializer(user).data,
+                "membership": {
+                    "id": membership.id,
+                    "company_id": membership.company_id,
+                    "role": membership.role,
+                    "employee_number": membership.employee_number,
+                    "job_title": membership.job_title,
+                    "department": membership.department,
+                    "contract_type": membership.contract_type,
+                    "employment_status": membership.employment_status,
+                    "entry_date": membership.entry_date,
+                    "vacation_days_per_year": membership.vacation_days_per_year,
+                    "is_time_tracking_enabled": membership.is_time_tracking_enabled,
+                    "can_manage_projects": membership.can_manage_projects,
+                    "is_active": membership.is_active,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class UserRetrieveUpdateView(generics.RetrieveUpdateAPIView):
