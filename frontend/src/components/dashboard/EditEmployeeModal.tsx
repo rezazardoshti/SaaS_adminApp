@@ -18,7 +18,7 @@ type EditEmployeeModalProps = {
     membership: EmployeeMembershipDetail;
   }>;
   onSubmit: (payload: {
-    employee: EmployeeMembershipItem;
+    employee: EmployeeMembershipItem | null;
     userData: {
       first_name?: string;
       last_name?: string;

@@ -1,19 +1,34 @@
-# apps/worktime/admin.py
-
 from django.contrib import admin
 
+from .forms import WorkTimeEntryForm
 from .models import WorkTimeEntry, WorkTimePublicIDSequence
+
+
+def format_minutes_as_hhmm(minutes):
+    if minutes is None:
+        return "-"
+
+    try:
+        total_minutes = int(minutes)
+    except (TypeError, ValueError):
+        return "-"
+
+    hours = total_minutes // 60
+    rest_minutes = total_minutes % 60
+    return f"{hours:02d}:{rest_minutes:02d}"
 
 
 @admin.register(WorkTimePublicIDSequence)
 class WorkTimePublicIDSequenceAdmin(admin.ModelAdmin):
     list_display = ("company", "last_value")
-    search_fields = ("company__name",)
+    search_fields = ("company__company_name",)
     readonly_fields = ("last_value",)
 
 
 @admin.register(WorkTimeEntry)
 class WorkTimeEntryAdmin(admin.ModelAdmin):
+    form = WorkTimeEntryForm
+
     ordering = ("-work_date", "-started_at", "-created_at")
 
     list_display = (
@@ -27,7 +42,7 @@ class WorkTimeEntryAdmin(admin.ModelAdmin):
         "started_at",
         "ended_at",
         "break_minutes",
-        "duration_minutes_display",
+        "duration_display",
         "is_active",
         "created_at",
     )
@@ -45,21 +60,20 @@ class WorkTimeEntryAdmin(admin.ModelAdmin):
         "public_id",
         "title",
         "description",
+        "internal_note",
         "employee_membership__user__first_name",
         "employee_membership__user__last_name",
         "employee_membership__user__email",
-        "company__name",
+        "company__company_name",
         "project__name",
     )
 
     readonly_fields = (
         "public_id",
         "submitted_at",
-        "approved_at",
-        "rejected_at",
         "created_at",
         "updated_at",
-        "duration_minutes_display",
+        "duration_display",
         "duration_hours_display",
     )
 
@@ -94,7 +108,7 @@ class WorkTimeEntryAdmin(admin.ModelAdmin):
                     "started_at",
                     "ended_at",
                     "break_minutes",
-                    "duration_minutes_display",
+                    "duration_display",
                     "duration_hours_display",
                 )
             },
@@ -132,10 +146,10 @@ class WorkTimeEntryAdmin(admin.ModelAdmin):
         ),
     )
 
-    def duration_minutes_display(self, obj):
-        return obj.duration_minutes
+    def duration_display(self, obj):
+        return format_minutes_as_hhmm(obj.duration_minutes)
 
-    duration_minutes_display.short_description = "Duration (minutes)"
+    duration_display.short_description = "Duration (HH:MM)"
 
     def duration_hours_display(self, obj):
         return obj.duration_hours

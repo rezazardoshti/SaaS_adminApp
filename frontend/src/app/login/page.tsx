@@ -3,12 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
 import { loginUser } from "@/services/api/auth";
 import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, getDefaultRoute } = useAuth();
 
   const [form, setForm] = useState({
     email: "",
@@ -16,7 +17,7 @@ export default function LoginPage() {
   });
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState("");
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setForm((prev) => ({
@@ -32,7 +33,7 @@ export default function LoginPage() {
     return "Login failed. Please check your credentials.";
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
@@ -40,7 +41,9 @@ export default function LoginPage() {
     try {
       const data = await loginUser(form);
       await login(data);
-      router.push("/dashboard");
+
+      const redirectTo = data?.redirect_to || getDefaultRoute();
+      router.push(redirectTo);
     } catch (err: any) {
       setError(getErrorMessage(err));
     } finally {
@@ -49,37 +52,82 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-12">
-      <div className="mx-auto flex min-h-[80vh] max-w-6xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
-        <div className="hidden w-1/2 bg-slate-900 p-10 text-white lg:flex lg:flex-col lg:justify-between">
+    <main className="min-h-screen bg-slate-950 text-white">
+      <div className="grid min-h-screen lg:grid-cols-2">
+        <section className="hidden lg:flex flex-col justify-between border-r border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-10 xl:p-14">
           <div>
-            <span className="inline-flex rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm">
+            <Link
+              href="/"
+              className="inline-flex items-center rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/90 transition hover:border-white/30 hover:bg-white/5"
+            >
               Craft Flow
-            </span>
-            <h1 className="mt-6 text-4xl font-semibold leading-tight">
-              Manage your team, company, and daily workflows in one place.
+            </Link>
+          </div>
+
+          <div className="max-w-xl">
+            <p className="mb-4 text-sm font-semibold uppercase tracking-[0.28em] text-sky-300">
+              Employee & Admin Access
+            </p>
+
+            <h1 className="text-4xl font-semibold leading-tight xl:text-5xl">
+              Sign in to your company workspace.
             </h1>
-            <p className="mt-4 max-w-md text-sm leading-6 text-slate-300">
-              Sign in to access your workspace, manage employees, and keep every
-              process structured from one central dashboard.
+
+            <p className="mt-6 text-base leading-8 text-white/70 xl:text-lg">
+              Track working hours, manage leave requests, receive schedules,
+              send documents, and stay connected with your company in one
+              secure place.
             </p>
+
+            <div className="mt-10 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-sm font-semibold text-white">
+                  For employees
+                </p>
+                <p className="mt-2 text-sm leading-7 text-white/65">
+                  Start and end work, request vacation, upload documents, and
+                  view messages from your admin.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                <p className="text-sm font-semibold text-white">
+                  For admins and owners
+                </p>
+                <p className="mt-2 text-sm leading-7 text-white/65">
+                  Access your own workspace first, then manage employees,
+                  company operations, and team workflows.
+                </p>
+              </div>
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-sm text-slate-200">
-              Built for business owners who want clarity, speed, and control.
-            </p>
+          <div className="text-sm text-white/40">
+            Structured daily operations for modern teams.
           </div>
-        </div>
+        </section>
 
-        <div className="flex w-full items-center justify-center px-6 py-10 lg:w-1/2 lg:px-10">
-          <div className="w-full max-w-md">
+        <section className="flex items-center justify-center p-6 sm:p-8 lg:p-10">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl shadow-slate-950/10 sm:p-8">
+            <div className="mb-8 lg:hidden">
+              <Link
+                href="/"
+                className="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Craft Flow
+              </Link>
+            </div>
+
             <div className="mb-8">
-              <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
                 Welcome back
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
+                Sign in
               </h2>
-              <p className="mt-2 text-sm text-slate-500">
-                Sign in to continue to your company dashboard.
+              <p className="mt-3 text-sm leading-7 text-slate-600">
+                Use the email address and password provided for your company
+                account.
               </p>
             </div>
 
@@ -95,16 +143,17 @@ export default function LoginPage() {
                   id="email"
                   name="email"
                   type="email"
+                  autoComplete="email"
                   value={form.email}
                   onChange={handleChange}
                   required
-                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-900"
-                  placeholder="you@company.com"
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                  placeholder="name@company.com"
                 />
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex items-center justify-between gap-3">
                   <label
                     htmlFor="password"
                     className="block text-sm font-medium text-slate-700"
@@ -114,7 +163,7 @@ export default function LoginPage() {
 
                   <Link
                     href="/forgot-password"
-                    className="text-sm font-medium text-slate-900 underline underline-offset-4"
+                    className="text-sm font-medium text-sky-700 transition hover:text-sky-800"
                   >
                     Forgot password?
                   </Link>
@@ -124,10 +173,11 @@ export default function LoginPage() {
                   id="password"
                   name="password"
                   type="password"
+                  autoComplete="current-password"
                   value={form.password}
                   onChange={handleChange}
                   required
-                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
                   placeholder="Enter your password"
                 />
               </div>
@@ -141,23 +191,23 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? "Signing in..." : "Sign in"}
               </button>
             </form>
 
-            <p className="mt-6 text-sm text-slate-500">
-              New here?{" "}
+            <div className="mt-6 text-center text-sm text-slate-600">
+              New company here?{" "}
               <Link
                 href="/register"
-                className="font-medium text-slate-900 underline underline-offset-4"
+                className="font-semibold text-sky-700 transition hover:text-sky-800"
               >
                 Create your company account
               </Link>
-            </p>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );

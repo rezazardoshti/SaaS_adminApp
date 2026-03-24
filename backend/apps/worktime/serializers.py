@@ -1,9 +1,20 @@
-# apps/worktime/serializers.py
-
 from django.utils import timezone
 from rest_framework import serializers
 
 from .models import WorkTimeEntry
+
+
+def get_minimum_break_minutes(started_at, ended_at):
+    if not started_at or not ended_at:
+        return 0
+
+    total_minutes = int((ended_at - started_at).total_seconds() // 60)
+
+    if total_minutes > 9 * 60:
+        return 45
+    if total_minutes > 6 * 60:
+        return 30
+    return 0
 
 
 class WorkTimeEntryListSerializer(serializers.ModelSerializer):
@@ -35,6 +46,8 @@ class WorkTimeEntryListSerializer(serializers.ModelSerializer):
             "duration_minutes",
             "duration_hours",
             "title",
+            "description",
+            "internal_note",
             "is_active",
             "created_at",
             "updated_at",
@@ -152,14 +165,15 @@ class WorkTimeEntryCreateSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
-        entry_type = attrs.get("entry_type", WorkTimeEntry.EntryType.MANUAL)
-        started_at = attrs.get("started_at")
-        ended_at = attrs.get("ended_at")
-        work_date = attrs.get("work_date")
-        break_minutes = attrs.get("break_minutes", 0)
         company = attrs.get("company")
         membership = attrs.get("employee_membership")
         project = attrs.get("project")
+        entry_type = attrs.get("entry_type", WorkTimeEntry.EntryType.MANUAL)
+        work_date = attrs.get("work_date")
+        started_at = attrs.get("started_at")
+        ended_at = attrs.get("ended_at")
+        break_minutes = attrs.get("break_minutes", 0)
+        internal_note = (attrs.get("internal_note") or "").strip()
 
         errors = {}
 
@@ -194,13 +208,26 @@ class WorkTimeEntryCreateSerializer(serializers.ModelSerializer):
         ):
             errors["entry_type"] = "Invalid entry type."
 
+        if entry_type == WorkTimeEntry.EntryType.MANUAL:
+            if not internal_note:
+                errors["internal_note"] = "A comment is required for manual work time entries."
+
+            if not project:
+                errors["project"] = "A project is required for manual work time entries."
+
         if errors:
             raise serializers.ValidationError(errors)
 
+        if started_at and ended_at:
+            minimum_break_minutes = get_minimum_break_minutes(started_at, ended_at)
+            attrs["break_minutes"] = max(int(break_minutes or 0), minimum_break_minutes)
+
+        attrs["internal_note"] = internal_note
         return attrs
 
     def create(self, validated_data):
         validated_data["status"] = WorkTimeEntry.Status.SUBMITTED
+        validated_data["is_active"] = False
         return super().create(validated_data)
 
 
@@ -221,7 +248,6 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         instance = self.instance
-
         project = attrs.get("project", instance.project)
         work_date = attrs.get("work_date", instance.work_date)
         started_at = attrs.get("started_at", instance.started_at)
@@ -246,10 +272,9 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
 
         if instance.status == WorkTimeEntry.Status.APPROVED:
             errors["status"] = "Approved entries cannot be edited."
-        
+
         if instance.status == WorkTimeEntry.Status.SUBMITTED:
             note = attrs.get("internal_note")
-
             if not note:
                 errors["internal_note"] = "A comment is required to modify a submitted entry."
 
@@ -258,6 +283,10 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
 
         if errors:
             raise serializers.ValidationError(errors)
+
+        if started_at and ended_at:
+            minimum_break_minutes = get_minimum_break_minutes(started_at, ended_at)
+            attrs["break_minutes"] = max(int(break_minutes or 0), minimum_break_minutes)
 
         return attrs
 
@@ -308,14 +337,12 @@ class WorkTimeEntryStartSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         now = timezone.now()
-
         validated_data["work_date"] = timezone.localtime(now).date()
         validated_data["started_at"] = now
         validated_data["ended_at"] = None
         validated_data["break_minutes"] = 0
         validated_data["entry_type"] = WorkTimeEntry.EntryType.TIMER
         validated_data["status"] = WorkTimeEntry.Status.RUNNING
-
         return super().create(validated_data)
 
 
@@ -348,30 +375,15 @@ class WorkTimeEntryStopSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         ended_at = timezone.now()
-        raw_break_minutes = validated_data.get(
-            "break_minutes",
-            instance.break_minutes,
-        ) or 0
-
-        total_minutes = int((ended_at - instance.started_at).total_seconds() // 60)
-
-        if total_minutes > 9 * 60:
-            minimum_break_minutes = 45
-        elif total_minutes > 6 * 60:
-            minimum_break_minutes = 30
-        else:
-            minimum_break_minutes = 0
-
-        final_break_minutes = max(raw_break_minutes, minimum_break_minutes)
+        raw_break_minutes = validated_data.get("break_minutes", instance.break_minutes) or 0
+        minimum_break_minutes = get_minimum_break_minutes(instance.started_at, ended_at)
+        final_break_minutes = max(int(raw_break_minutes), minimum_break_minutes)
 
         instance.ended_at = ended_at
         instance.break_minutes = final_break_minutes
         instance.title = validated_data.get("title", instance.title)
         instance.description = validated_data.get("description", instance.description)
-        instance.internal_note = validated_data.get(
-            "internal_note",
-            instance.internal_note,
-        )
+        instance.internal_note = validated_data.get("internal_note", instance.internal_note)
         instance.status = WorkTimeEntry.Status.SUBMITTED
         instance.save()
         return instance
@@ -406,7 +418,6 @@ class WorkTimeEntryApproveSerializer(serializers.ModelSerializer):
         instance.rejected_at = None
         instance.rejected_by = None
         instance.save()
-
         return instance
 
 

@@ -1,11 +1,10 @@
-# apps/worktime/views.py
-
 from django.db.models import Q
 from django.utils.dateparse import parse_date
+
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.response import Response
 
 from apps.companies.models import CompanyMembership
 
@@ -17,7 +16,6 @@ from .permissions import (
     CanStopWorkTimeEntry,
     CanViewWorkTimeEntry,
     get_user_membership_for_company,
-    user_is_company_owner_or_admin,
 )
 from .serializers import (
     WorkTimeEntryApproveSerializer,
@@ -97,15 +95,15 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
             admin_owner_company_ids = [
                 membership.company_id
                 for membership in memberships
-                if membership.role in (
-                    CompanyMembership.Role.OWNER,
-                    CompanyMembership.Role.ADMIN,
-                )
+                if membership.role
+                in (CompanyMembership.Role.OWNER, CompanyMembership.Role.ADMIN)
             ]
 
-            employee_q = Q(company_id__in=employee_company_ids, employee_membership__user=user)
+            employee_q = Q(
+                company_id__in=employee_company_ids,
+                employee_membership__user=user,
+            )
             admin_q = Q(company_id__in=admin_owner_company_ids)
-
             queryset = queryset.filter(employee_q | admin_q)
 
         if employee_membership_id:
@@ -149,11 +147,10 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
                 | Q(employee_membership__user__first_name__icontains=search)
                 | Q(employee_membership__user__last_name__icontains=search)
                 | Q(employee_membership__user__email__icontains=search)
-                | Q(company__name__icontains=search)
+                | Q(company__company_name__icontains=search)
             )
 
         return queryset.order_by("-work_date", "-started_at", "-created_at").distinct()
-    
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -161,6 +158,8 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return WorkTimeEntryDetailSerializer
         if self.action == "create":
+            return WorkTimeEntryCreateSerializer
+        if self.action == "manual":
             return WorkTimeEntryCreateSerializer
         if self.action in ("update", "partial_update"):
             return WorkTimeEntryUpdateSerializer
@@ -200,6 +199,9 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         if self.action == "stop":
             return [permissions.IsAuthenticated(), CanStopWorkTimeEntry()]
 
+        if self.action == "manual":
+            return [permissions.IsAuthenticated(), CanStartWorkTimeEntry()]
+
         if self.action in ("approve", "reject"):
             return [permissions.IsAuthenticated(), CanApproveRejectWorkTimeEntry()]
 
@@ -210,11 +212,12 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated(), CanEditWorkTimeEntry()]
 
         return [permissions.IsAuthenticated()]
-    
+
     def create(self, request, *args, **kwargs):
         return Response(
             {
-                "detail": "Direct creation is not allowed. Use the start action to begin work time."
+                "detail": "Direct creation is not allowed. "
+                "Use the start action to begin work time."
             },
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
@@ -227,17 +230,16 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("You do not have access to this company.")
 
         target_membership = serializer.validated_data.get("employee_membership")
+
         if membership.role == CompanyMembership.Role.EMPLOYEE:
             if not target_membership or target_membership.user_id != self.request.user.id:
                 raise PermissionDenied("Employees can only create their own entries.")
 
         serializer.save()
-    
+
     def destroy(self, request, *args, **kwargs):
         return Response(
-            {
-                "detail": "Deleting work time entries is not allowed."
-            },
+            {"detail": "Deleting work time entries is not allowed."},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
@@ -265,6 +267,31 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         )
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["post"], url_path="manual")
+    def manual(self, request, *args, **kwargs):
+        permission_denied = False
+        for permission in self.get_permissions():
+            if not permission.has_permission(request, self):
+                permission_denied = True
+                break
+
+        if permission_denied:
+            return Response(
+                {"detail": "You do not have permission to create this entry."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        entry = serializer.instance
+
+        response_serializer = WorkTimeEntryDetailSerializer(
+            entry,
+            context=self.get_serializer_context(),
+        )
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=["post"], url_path="stop")
     def stop(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -285,7 +312,10 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         self.check_object_permissions(request, instance)
 
-        approver_membership = get_user_membership_for_company(request.user, instance.company)
+        approver_membership = get_user_membership_for_company(
+            request.user,
+            instance.company,
+        )
         if not approver_membership:
             return Response(
                 {"detail": "You do not have access to approve this entry."},
@@ -325,7 +355,10 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         self.check_object_permissions(request, instance)
 
-        rejector_membership = get_user_membership_for_company(request.user, instance.company)
+        rejector_membership = get_user_membership_for_company(
+            request.user,
+            instance.company,
+        )
         if not rejector_membership:
             return Response(
                 {"detail": "You do not have access to reject this entry."},
