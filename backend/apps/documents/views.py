@@ -23,28 +23,40 @@ class DocumentViewSet(viewsets.ModelViewSet):
             "employee_membership",
             "employee_membership__user",
             "uploaded_by",
-        )
+        ).filter(is_active=True)
 
         if user.is_superuser:
-            return queryset.filter(is_active=True)
+            queryset = queryset
+        else:
+            memberships = CompanyMembership.objects.filter(
+                user=user,
+                is_active=True,
+            )
 
-        memberships = CompanyMembership.objects.filter(
-            user=user,
-            is_active=True,
-        )
+            queryset = queryset.filter(
+                company__memberships__in=memberships
+            ).distinct()
 
-        queryset = queryset.filter(
-            company__memberships__in=memberships
-        )
-
-        queryset = queryset.filter(is_active=True).distinct()
-
+        company = self.request.query_params.get("company")
+        employee_membership = self.request.query_params.get("employee_membership")
+        category = self.request.query_params.get("category")
+        visibility = self.request.query_params.get("visibility")
         mine = self.request.query_params.get("mine")
 
+        if company:
+            queryset = queryset.filter(company_id=company)
+
+        if employee_membership:
+            queryset = queryset.filter(employee_membership_id=employee_membership)
+
+        if category:
+            queryset = queryset.filter(category=category)
+
+        if visibility:
+            queryset = queryset.filter(visibility=visibility)
+
         if str(mine).lower() in ["1", "true", "yes"]:
-            queryset = queryset.filter(
-                employee_membership__user=user
-            )
+            queryset = queryset.filter(employee_membership__user=user)
 
         return queryset.order_by("-created_at")
 

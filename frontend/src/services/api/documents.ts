@@ -74,23 +74,12 @@ type ApiErrorPayload =
 function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
 
-  const directToken = window.localStorage.getItem("access");
-  if (directToken) return directToken;
-
-  const authStorage = window.localStorage.getItem("auth");
-  if (!authStorage) return null;
-
-  try {
-    const parsed = JSON.parse(authStorage) as {
-      access?: string;
-      token?: string;
-      accessToken?: string;
-    };
-
-    return parsed.access || parsed.token || parsed.accessToken || null;
-  } catch {
-    return null;
-  }
+  return (
+    localStorage.getItem("access") ||
+    localStorage.getItem("accessToken") ||
+    sessionStorage.getItem("access") ||
+    sessionStorage.getItem("accessToken")
+  );
 }
 
 function buildHeaders(extra?: HeadersInit): HeadersInit {
@@ -115,12 +104,7 @@ function buildUrl(path: string, params?: Record<string, unknown>): string {
 
   if (params) {
     for (const [key, value] of Object.entries(params)) {
-      if (
-        value === undefined ||
-        value === null ||
-        value === "" ||
-        value === false
-      ) {
+      if (value === undefined || value === null || value === "" || value === false) {
         continue;
       }
 
@@ -140,22 +124,19 @@ function normalizeErrorMessage(payload: ApiErrorPayload, fallback: string): stri
 
   if (typeof payload === "string") return payload;
 
-  if (Array.isArray(payload)) {
-    return payload.join(", ") || fallback;
-  }
+  if (Array.isArray(payload)) return payload.join(", ") || fallback;
 
   if (typeof payload === "object") {
-    const firstValue = Object.values(payload)[0];
-
-    if (typeof firstValue === "string") return firstValue;
-
-    if (Array.isArray(firstValue)) {
-      const firstText = firstValue.find((item) => typeof item === "string");
-      if (typeof firstText === "string") return firstText;
-    }
-
     if ("detail" in payload && typeof payload.detail === "string") {
       return payload.detail;
+    }
+
+    for (const value of Object.values(payload)) {
+      if (typeof value === "string" && value.trim()) return value;
+      if (Array.isArray(value)) {
+        const firstText = value.find((item) => typeof item === "string");
+        if (typeof firstText === "string") return firstText;
+      }
     }
   }
 
@@ -190,7 +171,11 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function formDataRequest<T>(url: string, formData: FormData, method: "POST" | "PATCH") {
+async function formDataRequest<T>(
+  url: string,
+  formData: FormData,
+  method: "POST" | "PATCH"
+): Promise<T> {
   const response = await fetch(url, {
     method,
     headers: buildHeaders(),
@@ -235,28 +220,16 @@ function buildDocumentFormData(
   }
 
   if (payload.employee_membership !== undefined) {
-    if (payload.employee_membership === null) {
-      formData.append("employee_membership", "");
-    } else {
-      formData.append("employee_membership", String(payload.employee_membership));
-    }
+    formData.append(
+      "employee_membership",
+      payload.employee_membership === null ? "" : String(payload.employee_membership)
+    );
   }
 
-  if (payload.title !== undefined) {
-    formData.append("title", payload.title);
-  }
-
-  if (payload.description !== undefined) {
-    formData.append("description", payload.description);
-  }
-
-  if (payload.category !== undefined) {
-    formData.append("category", payload.category);
-  }
-
-  if (payload.visibility !== undefined) {
-    formData.append("visibility", payload.visibility);
-  }
+  if (payload.title !== undefined) formData.append("title", payload.title);
+  if (payload.description !== undefined) formData.append("description", payload.description);
+  if (payload.category !== undefined) formData.append("category", payload.category);
+  if (payload.visibility !== undefined) formData.append("visibility", payload.visibility);
 
   if ("file" in payload && payload.file instanceof File) {
     formData.append("file", payload.file);
@@ -294,45 +267,7 @@ export function formatDocumentFileSize(value?: number | null): string {
   return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
-export function getDocumentCategoryLabel(category?: DocumentCategory | string | null): string {
-  switch (category) {
-    case "general":
-      return "General";
-    case "invoice":
-      return "Invoice";
-    case "receipt":
-      return "Receipt";
-    case "contract":
-      return "Contract";
-    case "sick_note":
-      return "Sick Note";
-    case "vacation_attachment":
-      return "Vacation Attachment";
-    case "other":
-      return "Other";
-    default:
-      return category || "-";
-  }
-}
-
-export function getDocumentVisibilityLabel(
-  visibility?: DocumentVisibility | string | null
-): string {
-  switch (visibility) {
-    case "private":
-      return "Private";
-    case "company_admin":
-      return "Company Admin";
-    case "company_all":
-      return "Company All";
-    default:
-      return visibility || "-";
-  }
-}
-
-export async function getDocuments(
-  params?: DocumentListParams
-): Promise<DocumentItem[]> {
+export async function getDocuments(params?: DocumentListParams): Promise<DocumentItem[]> {
   const url = buildUrl("/documents/documents/", {
     company: params?.company,
     employee_membership: params?.employee_membership,
@@ -350,12 +285,9 @@ export async function getDocumentById(id: number | string): Promise<DocumentItem
   return apiRequest<DocumentItem>(url);
 }
 
-export async function createDocument(
-  payload: DocumentCreatePayload
-): Promise<DocumentItem> {
+export async function createDocument(payload: DocumentCreatePayload): Promise<DocumentItem> {
   const url = buildUrl("/documents/documents/");
-  const formData = buildDocumentFormData(payload);
-  return formDataRequest<DocumentItem>(url, formData, "POST");
+  return formDataRequest<DocumentItem>(url, buildDocumentFormData(payload), "POST");
 }
 
 export async function updateDocument(
@@ -363,8 +295,7 @@ export async function updateDocument(
   payload: DocumentUpdatePayload
 ): Promise<DocumentItem> {
   const url = buildUrl(`/documents/documents/${id}/`);
-  const formData = buildDocumentFormData(payload);
-  return formDataRequest<DocumentItem>(url, formData, "PATCH");
+  return formDataRequest<DocumentItem>(url, buildDocumentFormData(payload), "PATCH");
 }
 
 export async function deleteDocument(id: number | string): Promise<void> {

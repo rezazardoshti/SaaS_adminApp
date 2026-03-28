@@ -46,21 +46,16 @@ function SectionCard({
   title,
   subtitle,
   children,
-  right,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
-  right?: React.ReactNode;
 }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-4 border-b border-slate-100 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
-        </div>
-        {right ? <div>{right}</div> : null}
+      <div className="border-b border-slate-100 px-6 py-5">
+        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
       </div>
       <div className="p-6">{children}</div>
     </section>
@@ -101,6 +96,21 @@ function MessageBox({
       }`}
     >
       {text}
+    </div>
+  );
+}
+
+function MetaRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[120px_1fr] sm:gap-3">
+      <div className="text-sm font-medium text-slate-500">{label}</div>
+      <div className="min-w-0 text-sm text-slate-800">{value}</div>
     </div>
   );
 }
@@ -193,12 +203,14 @@ export default function WorkspaceDocumentsPage() {
   }, [documents, search]);
 
   const stats = useMemo(() => {
-    const total = documents.length;
-    const totalSize = documents.reduce((sum, item) => sum + Number(item.file_size || 0), 0);
+    const now = new Date();
+
     const thisMonth = documents.filter((item) => {
       if (!item.created_at) return false;
       const created = new Date(item.created_at);
-      const now = new Date();
+
+      if (Number.isNaN(created.getTime())) return false;
+
       return (
         created.getFullYear() === now.getFullYear() &&
         created.getMonth() === now.getMonth()
@@ -206,8 +218,7 @@ export default function WorkspaceDocumentsPage() {
     }).length;
 
     return {
-      total: String(total),
-      totalSize: formatDocumentFileSize(totalSize),
+      total: String(documents.length),
       thisMonth: String(thisMonth),
     };
   }, [documents]);
@@ -224,31 +235,36 @@ export default function WorkspaceDocumentsPage() {
         setErrorMessage("");
 
         let activeMembership = membershipData;
+        let activeCompanyId = company?.id ?? null;
 
-        if (!activeMembership?.company || !activeMembership?.id) {
+        if (!activeMembership?.id) {
           const memberships = (await getMyMemberships(access)) as MembershipWithDocument[];
           activeMembership = memberships.find((item) => item.is_active) || memberships[0] || null;
           setResolvedMembership(activeMembership);
         }
 
-        if (!activeMembership?.company || !activeMembership?.id) {
-          throw new Error("Company or employee membership is missing for this account.");
+        if (!activeCompanyId && activeMembership?.company) {
+          activeCompanyId = activeMembership.company;
+        }
+
+        if (!activeCompanyId) {
+          throw new Error("Company is missing for this account.");
         }
 
         const docs = await getDocuments({
-          company: activeMembership.company,
-          employee_membership: activeMembership.id,
+          company: activeCompanyId,
           mine: true,
         });
 
         setDocuments(Array.isArray(docs) ? docs : []);
       } catch (error) {
         setErrorMessage(parseApiError(error, "Documents could not be loaded."));
+        setDocuments([]);
       } finally {
         if (showLoader) setLoading(false);
       }
     },
-    [access, membershipData]
+    [access, membershipData, company?.id]
   );
 
   useEffect(() => {
@@ -296,18 +312,15 @@ export default function WorkspaceDocumentsPage() {
   async function handleSaveDocument(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!membershipData?.company || !membershipData?.id) {
+    const activeCompanyId = company?.id || membershipData?.company;
+
+    if (!activeCompanyId || !membershipData?.id) {
       setErrorMessage("Company or employee membership is missing for this account.");
       return;
     }
 
     if (!form.title.trim()) {
       setErrorMessage("Bitte einen Betreff eingeben.");
-      return;
-    }
-
-    if (!editingItem && !form.file) {
-      setErrorMessage("Bitte eine Datei auswählen.");
       return;
     }
 
@@ -318,7 +331,7 @@ export default function WorkspaceDocumentsPage() {
 
       if (editingItem) {
         const payload: DocumentUpdatePayload = {
-          company: membershipData.company,
+          company: activeCompanyId,
           employee_membership: membershipData.id,
           title: form.title.trim(),
           description: form.description.trim(),
@@ -334,17 +347,17 @@ export default function WorkspaceDocumentsPage() {
         setSuccessMessage("Dokument erfolgreich aktualisiert.");
       } else {
         const payload: DocumentCreatePayload = {
-          company: membershipData.company,
+          company: activeCompanyId,
           employee_membership: membershipData.id,
           title: form.title.trim(),
           description: form.description.trim(),
           category: FIXED_EMPLOYEE_CATEGORY,
           visibility: FIXED_EMPLOYEE_VISIBILITY,
-          file: form.file as File,
-        };
+          ...(form.file ? { file: form.file } : {}),
+        } as DocumentCreatePayload;
 
         await createDocument(payload);
-        setSuccessMessage("Dokument erfolgreich hochgeladen.");
+        setSuccessMessage("Dokument erfolgreich gesendet.");
       }
 
       resetForm();
@@ -398,28 +411,23 @@ export default function WorkspaceDocumentsPage() {
         {successMessage ? <MessageBox type="success" text={successMessage} /> : null}
         {errorMessage ? <MessageBox type="error" text={errorMessage} /> : null}
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <StatCard
-  title="My documents"
-  value={stats.total}
-  helper="Alle Dokumente, die du bisher hochgeladen hast."
-/>
-<StatCard
-  title="Uploaded this month"
-  value={stats.thisMonth}
-  helper="Dokumente, die im aktuellen Monat hinzugefügt wurden."
-/>
-<StatCard
-  title="Storage used"
-  value={stats.totalSize}
-  helper="Gesamte Dateigröße deiner hochgeladenen Unterlagen."
-/>
+            title="My documents"
+            value={stats.total}
+            helper="Alle Dokumente, die du gesendet hast."
+          />
+          <StatCard
+            title="Uploaded this month"
+            value={stats.thisMonth}
+            helper="Deine gesendeten Dokumente im aktuellen Monat."
+          />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.05fr_1.45fr]">
+        <div className="grid gap-6 xl:grid-cols-2">
           <SectionCard
-            title={editingItem ? "Dokument bearbeiten" : "Dokument hochladen"}
-            subtitle="Einfacher Upload für deine eigenen Unterlagen."
+            title={editingItem ? "Senden bearbeiten" : "Senden"}
+            subtitle="Einfaches Senden für deine eigenen Unterlagen."
           >
             <form onSubmit={handleSaveDocument} className="grid gap-4">
               <div>
@@ -444,7 +452,7 @@ export default function WorkspaceDocumentsPage() {
                   Beschreibung
                 </label>
                 <textarea
-                  rows={4}
+                  rows={5}
                   value={form.description}
                   onChange={(e) =>
                     setForm((prev) => ({
@@ -459,7 +467,7 @@ export default function WorkspaceDocumentsPage() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                  {editingItem ? "Datei ersetzen (optional)" : "Datei"}
+                  Datei (optional)
                 </label>
                 <input
                   ref={fileInputRef}
@@ -473,9 +481,7 @@ export default function WorkspaceDocumentsPage() {
                   className="block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700"
                 />
                 {form.file ? (
-                  <p className="mt-2 text-xs text-slate-500">
-                    Selected: {form.file.name}
-                  </p>
+                  <p className="mt-2 text-xs text-slate-500">Selected: {form.file.name}</p>
                 ) : null}
                 {editingItem?.original_filename ? (
                   <p className="mt-1 text-xs text-slate-500">
@@ -485,7 +491,7 @@ export default function WorkspaceDocumentsPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                This upload is automatically assigned to your company and your own employee profile.
+                This send is automatically assigned to your company and your own employee profile.
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -498,7 +504,7 @@ export default function WorkspaceDocumentsPage() {
                     ? "Saving..."
                     : editingItem
                     ? "Änderungen speichern"
-                    : "Dokument hochladen"}
+                    : "Senden"}
                 </button>
 
                 {editingItem ? (
@@ -526,66 +532,64 @@ export default function WorkspaceDocumentsPage() {
                     key={item.id}
                     className="rounded-2xl border border-slate-200 p-5 transition hover:border-slate-300"
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-3">
-                        <div className="text-base font-semibold text-slate-900">
-                          {item.title}
-                        </div>
-
-                        <div className="grid gap-2 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-3">
-                          <div>
-                            <span className="font-medium text-slate-800">Document ID:</span>{" "}
+                    <div className="space-y-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="break-words text-base font-semibold text-slate-900">
+                            {item.title}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
                             {item.public_id || "-"}
                           </div>
-                          <div>
-                            <span className="font-medium text-slate-800">Filename:</span>{" "}
-                            {item.original_filename || "-"}
-                          </div>
-                          <div>
-                            <span className="font-medium text-slate-800">Size:</span>{" "}
-                            {formatDocumentFileSize(item.file_size)}
-                          </div>
-                          <div>
-                            <span className="font-medium text-slate-800">Type:</span>{" "}
-                            {item.mime_type || "-"}
-                          </div>
-                          <div>
-                            <span className="font-medium text-slate-800">Uploaded:</span>{" "}
-                            {formatDocumentDate(item.created_at)}
-                          </div>
-                          <div>
-                            <span className="font-medium text-slate-800">Assigned to:</span>{" "}
-                            {item.employee_full_name || displayName}
-                          </div>
                         </div>
 
-                        {item.description ? (
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                            {item.description}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 lg:max-w-[320px] lg:justify-end">
-                        {item.file || item.file_url ? (
-                          <a
-                            href={item.file_url || item.file || "#"}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700"
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(item)}
+                            className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                           >
-                            Open file
-                          </a>
-                        ) : null}
-
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(item)}
-                          className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                        >
-                          Edit
-                        </button>
+                            Edit
+                          </button>
+                        </div>
                       </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="grid gap-3">
+                          <MetaRow label="Document ID" value={item.public_id || "-"} />
+                          <MetaRow
+                            label="Filename"
+                            value={<span className="break-all">{item.original_filename || "-"}</span>}
+                          />
+                          <MetaRow
+                            label="Size"
+                            value={formatDocumentFileSize(item.file_size)}
+                          />
+                          <MetaRow label="Type" value={item.mime_type || "-"} />
+                          <MetaRow
+                            label="Uploaded"
+                            value={formatDocumentDate(item.created_at)}
+                          />
+                          <MetaRow
+                            label="Assigned"
+                            value={item.employee_full_name || displayName}
+                          />
+                        </div>
+                      </div>
+
+                      {item.description ? (
+                        <div>
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Message
+                          </div>
+
+                          <div className="max-h-48 overflow-y-auto rounded-2xl bg-slate-100 p-4">
+                            <p className="break-all whitespace-pre-wrap text-sm leading-6 text-slate-800">
+                              {item.description}
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}

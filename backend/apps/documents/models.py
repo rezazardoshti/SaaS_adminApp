@@ -106,7 +106,7 @@ class Document(models.Model):
         db_index=True,
     )
 
-    file = models.FileField(upload_to=document_file_upload_to)
+    file = models.FileField(upload_to="documents/",blank=True,null=True)
     original_filename = models.CharField(max_length=255, blank=True)
     file_size = models.PositiveBigIntegerField(default=0)
     mime_type = models.CharField(max_length=100, blank=True)
@@ -139,8 +139,9 @@ class Document(models.Model):
                     "Employee membership must belong to the same company."
                 )
 
-        if not self.file:
-            errors["file"] = "A file is required."
+        # 👉 Nur Titel Pflicht
+        if not self.title or not self.title.strip():
+            errors["title"] = "Title is required."
 
         if errors:
             raise ValidationError(errors)
