@@ -13,13 +13,13 @@ import {
 import {
   endWork,
   formatMinutesToHours,
-  getFirstActiveEntry,
   getMyActiveWorktime,
   getMyWorktimeEntries,
   getWorktimeResults,
   startWork,
   type WorktimeEntry,
 } from "@/services/api/worktime";
+import { getMyMemberships } from "@/services/api/employees";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
@@ -27,6 +27,9 @@ const API_BASE_URL =
 type MembershipWithTarget = {
   id: number;
   role: "owner" | "admin" | "employee";
+  company: number;
+  company_public_id?: string;
+  company_name?: string;
   employee_number?: string | null;
   job_title?: string | null;
   department?: string | null;
@@ -192,8 +195,10 @@ function getEntryHours(entry: WorktimeEntry) {
     const asNumber = Number(entry.duration_hours);
 
     if (!Number.isNaN(asNumber)) {
-      const hours = Math.floor(asNumber);
-      const minutes = Math.round((asNumber - hours) * 60);
+      const totalMinutes = Math.round(asNumber * 60);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+
       return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
         2,
         "0"
@@ -231,19 +236,39 @@ function parseMonthValue(value: string) {
   };
 }
 
+function getSafeAccessToken(access?: string | null) {
+  if (access && access.trim()) return access;
+
+  if (typeof window !== "undefined") {
+    const fallback =
+      localStorage.getItem("access") ||
+      localStorage.getItem("accessToken") ||
+      sessionStorage.getItem("access") ||
+      sessionStorage.getItem("accessToken");
+
+    if (fallback && fallback.trim()) return fallback;
+  }
+
+  return "";
+}
+
 export default function WorkspaceWorktimePage() {
-  const { user, membership, company, access } = useAuth();
-  const membershipData = membership as MembershipWithTarget | null;
+  const { user, membership, company, access: authAccess } = useAuth();
+  const access = getSafeAccessToken(authAccess);
+  const membershipFromContext = membership as MembershipWithTarget | null;
 
   const now = new Date();
   const [selectedMonthValue, setSelectedMonthValue] = useState(
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   );
 
+  const [resolvedMembership, setResolvedMembership] =
+    useState<MembershipWithTarget | null>(membershipFromContext);
   const [entries, setEntries] = useState<WorktimeEntry[]>([]);
   const [activeEntry, setActiveEntry] = useState<WorktimeEntry | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const [actionLoading, setActionLoading] = useState<
     "start" | "end" | "manual" | "edit" | null
   >(null);
@@ -276,6 +301,8 @@ export default function WorkspaceWorktimePage() {
     internal_note: "",
   });
 
+  const membershipData = resolvedMembership || membershipFromContext;
+
   const displayName = useMemo(() => {
     return (
       user?.full_name?.trim() ||
@@ -287,7 +314,8 @@ export default function WorkspaceWorktimePage() {
 
   const employeeNumber = membershipData?.employee_number || "-";
   const department = membershipData?.department || "-";
-  const companyName = company?.company_name || "-";
+  const companyName =
+    company?.company_name || membershipData?.company_name || "-";
 
   const activeProjects = useMemo(() => getActiveProjects(projects), [projects]);
 
@@ -408,6 +436,7 @@ export default function WorkspaceWorktimePage() {
     async (showLoader = true) => {
       if (!access) {
         setPageLoading(false);
+        setAuthReady(true);
         return;
       }
 
@@ -416,25 +445,59 @@ export default function WorkspaceWorktimePage() {
           setPageLoading(true);
         }
 
+        setErrorMessage("");
+
+        let activeMembership = membershipData;
+
+        if (!activeMembership?.company) {
+          const memberships = (await getMyMemberships(
+            access
+          )) as MembershipWithTarget[];
+
+          activeMembership =
+            memberships.find((item) => item.is_active) || memberships[0] || null;
+
+          setResolvedMembership(activeMembership);
+        }
+
+        if (!activeMembership?.company) {
+          throw {
+            detail:
+              "Company or employee membership is missing for this account.",
+          };
+        }
+
+        const companyPublicId =
+          company?.public_id || activeMembership.company_public_id;
+
         const [entriesResponse, activeResponse, projectsResponse] =
           await Promise.all([
-            getMyWorktimeEntries(access),
-            getMyActiveWorktime(access),
-            getProjects(access, company?.public_id),
+            getMyWorktimeEntries({
+              token: access,
+              companyId: activeMembership.company,
+            }),
+            getMyActiveWorktime({
+              token: access,
+              companyId: activeMembership.company,
+            }),
+            companyPublicId
+              ? getProjects(access, companyPublicId)
+              : Promise.resolve([]),
           ]);
 
         setEntries(getWorktimeResults(entriesResponse));
-        setActiveEntry(getFirstActiveEntry(activeResponse));
-        setProjects(getProjectResults(projectsResponse));
+        setActiveEntry(activeResponse || null);
+        setProjects(getProjectResults(projectsResponse as any));
       } catch (error: any) {
         setErrorMessage(error?.detail || "Worktime data could not be loaded.");
       } finally {
         if (showLoader) {
           setPageLoading(false);
         }
+        setAuthReady(true);
       }
     },
-    [access, company?.public_id]
+    [access, company?.public_id, membershipData]
   );
 
   useEffect(() => {
@@ -445,7 +508,9 @@ export default function WorkspaceWorktimePage() {
     if (!access) return;
 
     const interval = setInterval(() => {
-      loadWorktimeData(false);
+      if (document.visibilityState === "visible") {
+        loadWorktimeData(false);
+      }
     }, 6000);
 
     return () => clearInterval(interval);
@@ -465,9 +530,12 @@ export default function WorkspaceWorktimePage() {
   }, [activeProjects, selectedProjectId, manualForm.project]);
 
   async function handleStartWork() {
-    if (!access) return;
+    if (!access) {
+      setErrorMessage("Anmeldedaten fehlen. Bitte melde dich neu an.");
+      return;
+    }
 
-    if (!company?.id || !membershipData?.id) {
+    if (!membershipData?.company || !membershipData?.id) {
       setErrorMessage(
         "Company or employee membership is missing for this account."
       );
@@ -485,7 +553,7 @@ export default function WorkspaceWorktimePage() {
       setSuccessMessage("");
 
       await startWork(access, {
-        company: company.id,
+        company: membershipData.company,
         employee_membership: membershipData.id,
         project: Number(selectedProjectId),
       });
@@ -504,7 +572,10 @@ export default function WorkspaceWorktimePage() {
   }
 
   async function handleEndWork() {
-    if (!access) return;
+    if (!access) {
+      setErrorMessage("Anmeldedaten fehlen. Bitte melde dich neu an.");
+      return;
+    }
 
     if (!activeEntry?.public_id) {
       setErrorMessage("No active work entry was found.");
@@ -530,9 +601,12 @@ export default function WorkspaceWorktimePage() {
   async function handleManualSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!access) return;
+    if (!access) {
+      setErrorMessage("Anmeldedaten fehlen. Bitte melde dich neu an.");
+      return;
+    }
 
-    if (!company?.id || !membershipData?.id) {
+    if (!membershipData?.company || !membershipData?.id) {
       setErrorMessage(
         "Company or employee membership is missing for this account."
       );
@@ -566,7 +640,7 @@ export default function WorkspaceWorktimePage() {
           Authorization: `Bearer ${access}`,
         },
         body: JSON.stringify({
-          company: company.id,
+          company: membershipData.company,
           employee_membership: membershipData.id,
           project: Number(manualForm.project),
           entry_type: "manual",
@@ -658,7 +732,10 @@ export default function WorkspaceWorktimePage() {
   async function handleEditSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!access) return;
+    if (!access) {
+      setErrorMessage("Anmeldedaten fehlen. Bitte melde dich neu an.");
+      return;
+    }
 
     if (!editForm.public_id) {
       setErrorMessage("No entry selected for editing.");
@@ -734,6 +811,24 @@ export default function WorkspaceWorktimePage() {
 
   const canStart = !activeEntry && !pageLoading;
   const canEnd = !!activeEntry && !pageLoading;
+
+  if (!access && authReady) {
+    return (
+      <div className="space-y-6">
+        <section className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-sm sm:p-8">
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-red-700">
+            Working time
+          </p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
+            Time tracking
+          </h1>
+          <p className="mt-4 text-sm leading-7 text-red-700">
+            Anmeldedaten fehlen. Bitte melde dich neu an.
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

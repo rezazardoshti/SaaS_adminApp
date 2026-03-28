@@ -1,6 +1,7 @@
 import { apiRequest } from "./client";
 
 export type EmployeeRole = "owner" | "admin" | "employee";
+
 export type ContractType =
   | "full_time"
   | "part_time"
@@ -8,7 +9,10 @@ export type ContractType =
   | "working_student"
   | "freelancer"
   | "intern"
-  | "temporary";
+  | "temporary"
+  | "apprentice"
+  | "other";
+
 export type EmploymentStatus =
   | "active"
   | "inactive"
@@ -124,6 +128,8 @@ export type EmployeeCreatePayload = {
   contract_type?: ContractType;
   employment_status?: EmploymentStatus;
   entry_date?: string;
+  weekly_target_hours?: number | null;
+  monthly_target_hours?: number | null;
   vacation_days_per_year?: number;
   is_time_tracking_enabled?: boolean;
   can_manage_projects?: boolean;
@@ -152,6 +158,8 @@ export type EmployeeMembershipUpdatePayload = {
   employment_status?: EmploymentStatus | string;
   entry_date?: string | null;
   exit_date?: string | null;
+  weekly_target_hours?: number | string | null;
+  monthly_target_hours?: number | string | null;
   vacation_days_per_year?: number | string | null;
   is_time_tracking_enabled?: boolean;
   can_manage_projects?: boolean;
@@ -177,9 +185,7 @@ function getItems<T>(value: ListResponse<T>): T[] {
   return [];
 }
 
-function buildQuery(
-  params: Record<string, string | number | boolean | undefined>
-) {
+function buildQuery(params: Record<string, string | number | undefined | null>) {
   const searchParams = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
@@ -191,7 +197,9 @@ function buildQuery(
   return query ? `?${query}` : "";
 }
 
-export async function getMyMemberships(token: string) {
+export async function getMyMemberships(
+  token: string
+): Promise<EmployeeMembershipItem[]> {
   const response = await apiRequest(
     "/companies/memberships/mine/",
     "GET",
@@ -232,7 +240,12 @@ export async function createEmployee(token: string, payload: EmployeeCreatePaylo
 }
 
 export async function getEmployeeUserDetail(token: string, userId: number) {
-  return apiRequest(`/accounts/users/${userId}/`, "GET", undefined, token) as Promise<EmployeeUserDetail>;
+  return apiRequest(
+    `/accounts/users/${userId}/`,
+    "GET",
+    undefined,
+    token
+  ) as Promise<EmployeeUserDetail>;
 }
 
 export async function updateEmployeeUser(
@@ -240,10 +253,18 @@ export async function updateEmployeeUser(
   userId: number,
   payload: EmployeeUserUpdatePayload
 ) {
-  return apiRequest(`/accounts/users/${userId}/`, "PATCH", payload, token) as Promise<EmployeeUserDetail>;
+  return apiRequest(
+    `/accounts/users/${userId}/`,
+    "PATCH",
+    payload,
+    token
+  ) as Promise<EmployeeUserDetail>;
 }
 
-export async function getEmployeeMembershipDetail(token: string, membershipId: number) {
+export async function getEmployeeMembershipDetail(
+  token: string,
+  membershipId: number
+) {
   return apiRequest(
     `/companies/memberships/${membershipId}/`,
     "GET",

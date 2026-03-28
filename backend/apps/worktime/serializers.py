@@ -209,9 +209,6 @@ class WorkTimeEntryCreateSerializer(serializers.ModelSerializer):
             errors["entry_type"] = "Invalid entry type."
 
         if entry_type == WorkTimeEntry.EntryType.MANUAL:
-            if not internal_note:
-                errors["internal_note"] = "A comment is required for manual work time entries."
-
             if not project:
                 errors["project"] = "A project is required for manual work time entries."
 
@@ -236,6 +233,7 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
         model = WorkTimeEntry
         fields = (
             "project",
+            "status",
             "work_date",
             "started_at",
             "ended_at",
@@ -248,7 +246,11 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         instance = self.instance
+        request = self.context.get("request")
+        updater_membership = self.context.get("updater_membership")
+
         project = attrs.get("project", instance.project)
+        status_value = attrs.get("status", instance.status)
         work_date = attrs.get("work_date", instance.work_date)
         started_at = attrs.get("started_at", instance.started_at)
         ended_at = attrs.get("ended_at", instance.ended_at)
@@ -270,16 +272,26 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
         if break_minutes is not None and break_minutes < 0:
             errors["break_minutes"] = "Break minutes cannot be negative."
 
-        if instance.status == WorkTimeEntry.Status.APPROVED:
-            errors["status"] = "Approved entries cannot be edited."
-
-        if instance.status == WorkTimeEntry.Status.SUBMITTED:
-            note = attrs.get("internal_note")
-            if not note:
-                errors["internal_note"] = "A comment is required to modify a submitted entry."
-
         if instance.status == WorkTimeEntry.Status.RUNNING and "ended_at" in attrs:
             errors["ended_at"] = "Running entries must be stopped via the stop action."
+
+        if status_value != WorkTimeEntry.Status.RUNNING and not ended_at:
+            errors["ended_at"] = "A finished entry must have an end time."
+
+        if status_value == WorkTimeEntry.Status.RUNNING and ended_at:
+            errors["status"] = "A running entry cannot already have an end time."
+
+        if status_value in (
+            WorkTimeEntry.Status.APPROVED,
+            WorkTimeEntry.Status.REJECTED,
+        ):
+            if not request or not request.user or not request.user.is_authenticated:
+                errors["status"] = "Authenticated user is required for this status change."
+            elif not updater_membership:
+                errors["status"] = "Only owner or admin can set approved or rejected."
+            else:
+                if updater_membership.company_id != instance.company_id:
+                    errors["status"] = "Updater must belong to the same company."
 
         if errors:
             raise serializers.ValidationError(errors)
@@ -289,6 +301,53 @@ class WorkTimeEntryUpdateSerializer(serializers.ModelSerializer):
             attrs["break_minutes"] = max(int(break_minutes or 0), minimum_break_minutes)
 
         return attrs
+
+    def update(self, instance, validated_data):
+        updater_membership = self.context.get("updater_membership")
+        new_status = validated_data.get("status", instance.status)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+
+        now = timezone.now()
+
+        if new_status == WorkTimeEntry.Status.SUBMITTED:
+            if not instance.submitted_at:
+                instance.submitted_at = now
+            instance.approved_at = None
+            instance.approved_by = None
+            instance.rejected_at = None
+            instance.rejected_by = None
+            instance.is_active = False
+
+        elif new_status == WorkTimeEntry.Status.APPROVED:
+            instance.approved_at = now
+            instance.approved_by = updater_membership
+            instance.rejected_at = None
+            instance.rejected_by = None
+            if not instance.submitted_at:
+                instance.submitted_at = now
+            instance.is_active = False
+
+        elif new_status == WorkTimeEntry.Status.REJECTED:
+            instance.rejected_at = now
+            instance.rejected_by = updater_membership
+            instance.approved_at = None
+            instance.approved_by = None
+            if not instance.submitted_at:
+                instance.submitted_at = now
+            instance.is_active = False
+
+        elif new_status == WorkTimeEntry.Status.RUNNING:
+            instance.submitted_at = None
+            instance.approved_at = None
+            instance.approved_by = None
+            instance.rejected_at = None
+            instance.rejected_by = None
+            instance.is_active = True
+
+        instance.save()
+        return instance
 
 
 class WorkTimeEntryStartSerializer(serializers.ModelSerializer):

@@ -5,6 +5,7 @@ import type {
   ContractType,
   EmployeeRole,
   EmploymentStatus,
+  EmployeeMembershipItem,
 } from "@/services/api/employees";
 
 type CreateEmployeeModalProps = {
@@ -23,6 +24,8 @@ type CreateEmployeeModalProps = {
     contract_type?: ContractType;
     employment_status?: EmploymentStatus;
     entry_date?: string;
+    weekly_target_hours?: number | null;
+    monthly_target_hours?: number | null;
     vacation_days_per_year?: number;
     is_time_tracking_enabled?: boolean;
     can_manage_projects?: boolean;
@@ -46,6 +49,8 @@ const initialForm = {
   contract_type: "full_time" as ContractType,
   employment_status: "active" as EmploymentStatus,
   entry_date: "",
+  weekly_target_hours: 40,
+  monthly_target_hours: 173.33,
   vacation_days_per_year: 30,
   is_time_tracking_enabled: true,
   can_manage_projects: false,
@@ -60,7 +65,7 @@ export default function CreateEmployeeModal({
 }: CreateEmployeeModalProps) {
   const [form, setForm] = useState(initialForm);
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [generalError, setGeneralError] = useState<string>("");
+  const [generalError, setGeneralError] = useState("");
 
   const roleOptions = useMemo(() => {
     const base: { value: EmployeeRole; label: string }[] = [
@@ -89,20 +94,33 @@ export default function CreateEmployeeModal({
     if (!form.last_name.trim()) nextErrors.last_name = "Last name is required.";
     if (!form.email.trim()) nextErrors.email = "Email is required.";
     if (!form.password.trim()) nextErrors.password = "Password is required.";
+
     if (!form.password_confirm.trim()) {
       nextErrors.password_confirm = "Please confirm the password.";
     }
+
     if (form.password.trim().length < 8) {
       nextErrors.password = "Password should be at least 8 characters.";
     }
-    if (form.password && form.password_confirm && form.password !== form.password_confirm) {
+
+    if (
+      form.password &&
+      form.password_confirm &&
+      form.password !== form.password_confirm
+    ) {
       nextErrors.password_confirm = "Passwords do not match.";
     }
-    if (
-      form.vacation_days_per_year !== undefined &&
-      Number(form.vacation_days_per_year) < 0
-    ) {
+
+    if (Number(form.vacation_days_per_year) < 0) {
       nextErrors.vacation_days_per_year = "Vacation days cannot be negative.";
+    }
+
+    if (Number(form.weekly_target_hours) < 0) {
+      nextErrors.weekly_target_hours = "Weekly target hours cannot be negative.";
+    }
+
+    if (Number(form.monthly_target_hours) < 0) {
+      nextErrors.monthly_target_hours = "Monthly target hours cannot be negative.";
     }
 
     setErrors(nextErrors);
@@ -111,7 +129,6 @@ export default function CreateEmployeeModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
     if (!validate()) return;
 
     try {
@@ -128,6 +145,12 @@ export default function CreateEmployeeModal({
         contract_type: form.contract_type,
         employment_status: form.employment_status,
         entry_date: form.entry_date || undefined,
+        weekly_target_hours:
+          form.weekly_target_hours === "" ? null : Number(form.weekly_target_hours),
+        monthly_target_hours:
+          form.monthly_target_hours === ""
+            ? null
+            : Number(form.monthly_target_hours),
         vacation_days_per_year: Number(form.vacation_days_per_year || 0),
         is_time_tracking_enabled: Boolean(form.is_time_tracking_enabled),
         can_manage_projects: Boolean(form.can_manage_projects),
@@ -158,12 +181,12 @@ export default function CreateEmployeeModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">Add employee</h2>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-slate-500">
               Create the user account and assign the person directly to the current company.
             </p>
           </div>
@@ -171,15 +194,15 @@ export default function CreateEmployeeModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
           >
             Close
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-8 p-6">
           {generalError ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {generalError}
             </div>
           ) : null}
@@ -273,7 +296,9 @@ export default function CreateEmployeeModal({
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
                 />
                 {errors.password_confirm ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.password_confirm}</p>
+                  <p className="mt-1 text-xs text-red-600">
+                    {errors.password_confirm}
+                  </p>
                 ) : null}
               </div>
             </div>
@@ -284,7 +309,7 @@ export default function CreateEmployeeModal({
               Company role and employment
             </h3>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Role
@@ -314,9 +339,6 @@ export default function CreateEmployeeModal({
                   onChange={(e) => updateField("department", e.target.value)}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
                 />
-                {errors.department ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.department}</p>
-                ) : null}
               </div>
 
               <div>
@@ -328,9 +350,6 @@ export default function CreateEmployeeModal({
                   onChange={(e) => updateField("job_title", e.target.value)}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
                 />
-                {errors.job_title ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.job_title}</p>
-                ) : null}
               </div>
 
               <div>
@@ -350,9 +369,6 @@ export default function CreateEmployeeModal({
                   <option value="intern">Intern</option>
                   <option value="temporary">Temporary</option>
                 </select>
-                {errors.contract_type ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.contract_type}</p>
-                ) : null}
               </div>
 
               <div>
@@ -369,9 +385,6 @@ export default function CreateEmployeeModal({
                   <option value="on_leave">On leave</option>
                   <option value="terminated">Terminated</option>
                 </select>
-                {errors.employment_status ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.employment_status}</p>
-                ) : null}
               </div>
 
               <div>
@@ -384,8 +397,47 @@ export default function CreateEmployeeModal({
                   onChange={(e) => updateField("entry_date", e.target.value)}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
                 />
-                {errors.entry_date ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.entry_date}</p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Weekly target hours
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.25"
+                  value={form.weekly_target_hours}
+                  onChange={(e) =>
+                    updateField("weekly_target_hours", Number(e.target.value))
+                  }
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
+                />
+                {errors.weekly_target_hours ? (
+                  <p className="mt-1 text-xs text-red-600">
+                    {errors.weekly_target_hours}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Monthly target hours
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.25"
+                  value={form.monthly_target_hours}
+                  onChange={(e) =>
+                    updateField("monthly_target_hours", Number(e.target.value))
+                  }
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
+                />
+                {errors.monthly_target_hours ? (
+                  <p className="mt-1 text-xs text-red-600">
+                    {errors.monthly_target_hours}
+                  </p>
                 ) : null}
               </div>
 

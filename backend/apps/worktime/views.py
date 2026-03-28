@@ -176,6 +176,18 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
 
+        if self.action in ("update", "partial_update"):
+            instance = self.get_object()
+            membership = get_user_membership_for_company(
+                self.request.user,
+                instance.company,
+            )
+            if membership and membership.role in (
+                CompanyMembership.Role.OWNER,
+                CompanyMembership.Role.ADMIN,
+            ):
+                context["updater_membership"] = membership
+
         if self.action == "approve":
             instance = self.get_object()
             context["approver_membership"] = get_user_membership_for_company(

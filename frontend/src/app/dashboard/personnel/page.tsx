@@ -13,7 +13,10 @@ import {
   getMyMemberships,
   updateEmployeeMembership,
   updateEmployeeUser,
+  type EmployeeCreatePayload,
   type EmployeeMembershipItem,
+  type EmployeeMembershipUpdatePayload,
+  type EmployeeUserUpdatePayload,
 } from "@/services/api/employees";
 
 type FilterState = {
@@ -24,10 +27,12 @@ type FilterState = {
   contractType: string;
 };
 
-type FlashMessage = {
-  type: "success" | "error";
-  text: string;
-} | null;
+type FlashMessage =
+  | {
+      type: "success" | "error";
+      text: string;
+    }
+  | null;
 
 function InfoStat({
   label,
@@ -37,7 +42,7 @@ function InfoStat({
   value: string | number;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <p className="text-sm text-slate-500">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
     </div>
@@ -59,9 +64,7 @@ function Pill({
       : "bg-slate-100 text-slate-700";
 
   return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${classes}`}
-    >
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}>
       {children}
     </span>
   );
@@ -76,7 +79,7 @@ export default function PersonnelPage() {
 
   const [items, setItems] = useState<EmployeeMembershipItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState<string>("");
+  const [pageError, setPageError] = useState("");
   const [flash, setFlash] = useState<FlashMessage>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -86,7 +89,7 @@ export default function PersonnelPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   const [companyId, setCompanyId] = useState<number | null>(null);
-  const [currentRole, setCurrentRole] = useState<string>("");
+  const [currentRole, setCurrentRole] = useState("");
 
   const [filters, setFilters] = useState<FilterState>({
     search: "",
@@ -129,7 +132,13 @@ export default function PersonnelPage() {
     } finally {
       setLoading(false);
     }
-  }, [access, filters.contractType, filters.employmentStatus, filters.isActive, filters.role]);
+  }, [
+    access,
+    filters.contractType,
+    filters.employmentStatus,
+    filters.isActive,
+    filters.role,
+  ]);
 
   useEffect(() => {
     loadEmployees();
@@ -160,7 +169,6 @@ export default function PersonnelPage() {
 
   const filteredItems = useMemo(() => {
     const search = normalize(filters.search);
-
     if (!search) return items;
 
     return items.filter((item) => {
@@ -195,30 +203,7 @@ export default function PersonnelPage() {
     return { total, employees, admins, active };
   }, [items]);
 
-  async function handleCreateEmployee(payload: {
-    email: string;
-    password: string;
-    password_confirm: string;
-    first_name: string;
-    last_name: string;
-    phone?: string;
-    role: "owner" | "admin" | "employee";
-    department?: string;
-    job_title?: string;
-    contract_type?:
-      | "full_time"
-      | "part_time"
-      | "mini_job"
-      | "working_student"
-      | "freelancer"
-      | "intern"
-      | "temporary";
-    employment_status?: "active" | "inactive" | "on_leave" | "terminated";
-    entry_date?: string;
-    vacation_days_per_year?: number;
-    is_time_tracking_enabled?: boolean;
-    can_manage_projects?: boolean;
-  }) {
+  async function handleCreateEmployee(payload: Omit<EmployeeCreatePayload, "company_id">) {
     if (!access || !companyId) {
       throw { detail: "Current company could not be detected." };
     }
@@ -261,37 +246,11 @@ export default function PersonnelPage() {
   }
 
   async function handleUpdateEmployee(payload: {
-    employee: EmployeeMembershipItem;
-    userData: {
-      first_name?: string;
-      last_name?: string;
-      gender?: string;
-      phone?: string;
-      birth_date?: string | null;
-      street?: string;
-      postal_code?: string;
-      city?: string;
-      country?: string;
-      emergency_contact_person?: string;
-      emergency_contact_phone?: string;
-      notes?: string;
-    };
-    membershipData: {
-      role?: "owner" | "admin" | "employee";
-      job_title?: string;
-      department?: string;
-      contract_type?: string;
-      employment_status?: string;
-      entry_date?: string | null;
-      exit_date?: string | null;
-      vacation_days_per_year?: number;
-      is_time_tracking_enabled?: boolean;
-      can_manage_projects?: boolean;
-      notes?: string;
-      is_active?: boolean;
-    };
+    employee: EmployeeMembershipItem | null;
+    userData: EmployeeUserUpdatePayload;
+    membershipData: EmployeeMembershipUpdatePayload;
   }) {
-    if (!access || !payload.employee.user?.id) {
+    if (!access || !payload.employee?.user?.id) {
       throw { detail: "Employee could not be updated." };
     }
 
@@ -302,12 +261,10 @@ export default function PersonnelPage() {
       ]);
 
       await loadEmployees();
-
       setFlash({
         type: "success",
         text: "Employee data was saved successfully.",
       });
-
       setEditOpen(false);
       setSelectedEmployee(null);
     } catch (error: any) {
@@ -330,24 +287,24 @@ export default function PersonnelPage() {
       <PersonnelSubnav />
 
       {flash ? (
-        <section
-          className={`rounded-2xl border p-4 text-sm font-medium ${
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm ${
             flash.type === "success"
               ? "border-emerald-200 bg-emerald-50 text-emerald-700"
               : "border-red-200 bg-red-50 text-red-700"
           }`}
         >
           {flash.text}
-        </section>
+        </div>
       ) : null}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Employees</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              See the employees of the current company, filter them quickly, add
-              new people, and edit full employee information.
+            <h1 className="text-2xl font-semibold text-slate-900">Employees</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-500">
+              See the employees of the current company, filter them quickly,
+              add new people, and edit full employee information.
             </p>
           </div>
 
@@ -365,15 +322,15 @@ export default function PersonnelPage() {
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <InfoStat label="All visible people" value={stats.total} />
+        <InfoStat label="Total memberships" value={stats.total} />
         <InfoStat label="Employees" value={stats.employees} />
         <InfoStat label="Admins" value={stats.admins} />
         <InfoStat label="Active memberships" value={stats.active} />
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <div className="grid gap-4 lg:grid-cols-5">
-          <div className="lg:col-span-1">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="xl:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-slate-700">
               Search
             </label>
@@ -466,121 +423,106 @@ export default function PersonnelPage() {
               <option value="freelancer">Freelancer</option>
               <option value="intern">Intern</option>
               <option value="temporary">Temporary</option>
+              <option value="apprentice">Apprentice</option>
+              <option value="other">Other</option>
             </select>
           </div>
         </div>
       </section>
 
-      {loading ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
-          <p className="text-sm text-slate-600">Loading employees...</p>
-        </section>
-      ) : pageError ? (
-        <section className="rounded-2xl border border-red-200 bg-red-50 p-6">
-          <h3 className="text-lg font-semibold text-red-800">
-            Employees could not be loaded
-          </h3>
-          <p className="mt-2 text-sm text-red-700">{pageError}</p>
-        </section>
-      ) : (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        {loading ? (
+          <div className="p-8 text-sm text-slate-500">Loading employees...</div>
+        ) : pageError ? (
+          <div className="p-8">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Employees could not be loaded
+            </h3>
+            <p className="mt-2 text-sm text-red-600">{pageError}</p>
+          </div>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Person
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Employee no.
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Role
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Department
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Job title
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Contract
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredItems.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className="px-4 py-8 text-center text-sm text-slate-500"
-                    >
-                      No employees match the current filters.
-                    </td>
+            {filteredItems.length === 0 ? (
+              <div className="p-8 text-sm text-slate-500">
+                No employees match the current filters.
+              </div>
+            ) : (
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-3">Person</th>
+                    <th className="px-4 py-3">Employee no.</th>
+                    <th className="px-4 py-3">Role</th>
+                    <th className="px-4 py-3">Department</th>
+                    <th className="px-4 py-3">Job title</th>
+                    <th className="px-4 py-3">Contract</th>
+                    <th className="px-4 py-3">Weekly target</th>
+                    <th className="px-4 py-3">Monthly target</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Actions</th>
                   </tr>
-                ) : (
-                  filteredItems.map((item) => (
-                    <tr key={item.id} className="border-t border-slate-200">
-                      <td className="px-4 py-4 align-top">
-                        <div>
-                          <p className="font-medium text-slate-900">
-                            {item.user?.full_name ||
-                              [item.user?.first_name, item.user?.last_name]
-                                .filter(Boolean)
-                                .join(" ") ||
-                              "-"}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {item.user?.email || "-"}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-400">
-                            {item.user?.public_id || "-"}
-                          </p>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredItems.map((item) => (
+                    <tr key={item.id} className="align-top">
+                      <td className="px-4 py-4">
+                        <div className="font-medium text-slate-900">
+                          {item.user?.full_name ||
+                            [item.user?.first_name, item.user?.last_name]
+                              .filter(Boolean)
+                              .join(" ") ||
+                            "-"}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-500">
+                          {item.user?.email || "-"}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          {item.user?.public_id || "-"}
                         </div>
                       </td>
 
-                      <td className="px-4 py-4 align-top text-sm font-medium text-slate-900">
+                      <td className="px-4 py-4 text-sm text-slate-700">
                         {item.employee_number || "-"}
                       </td>
 
-                      <td className="px-4 py-4 align-top">
+                      <td className="px-4 py-4 text-sm text-slate-700">
                         <Pill>{item.role}</Pill>
                       </td>
 
-                      <td className="px-4 py-4 align-top text-sm text-slate-700">
+                      <td className="px-4 py-4 text-sm text-slate-700">
                         {item.department || "-"}
                       </td>
 
-                      <td className="px-4 py-4 align-top text-sm text-slate-700">
+                      <td className="px-4 py-4 text-sm text-slate-700">
                         {item.job_title || "-"}
                       </td>
 
-                      <td className="px-4 py-4 align-top text-sm text-slate-700">
+                      <td className="px-4 py-4 text-sm text-slate-700">
                         {item.contract_type || "-"}
                       </td>
 
-                      <td className="px-4 py-4 align-top">
+                      <td className="px-4 py-4 text-sm text-slate-700">
+                        {item.weekly_target_hours ?? "-"}
+                      </td>
+
+                      <td className="px-4 py-4 text-sm text-slate-700">
+                        {item.monthly_target_hours ?? "-"}
+                      </td>
+
+                      <td className="px-4 py-4">
                         <div className="flex flex-col gap-2">
                           <Pill tone={item.is_active ? "success" : "warning"}>
                             {item.is_active ? "active" : "inactive"}
                           </Pill>
 
                           {item.employment_status ? (
-                            <span className="text-xs text-slate-500">
-                              {item.employment_status}
-                            </span>
+                            <Pill>{item.employment_status}</Pill>
                           ) : null}
                         </div>
                       </td>
 
-                      <td className="px-4 py-4 align-top text-right">
+                      <td className="px-4 py-4">
                         <button
                           type="button"
                           onClick={() => {
@@ -594,13 +536,13 @@ export default function PersonnelPage() {
                         </button>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       <CreateEmployeeModal
         open={createOpen}
