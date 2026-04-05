@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import PersonnelSubnav from "@/components/dashboard/PersonnelSubnav";
 import CreateEmployeeModal from "@/components/dashboard/CreateEmployeeModal";
 import EditEmployeeModal from "@/components/dashboard/EditEmployeeModal";
@@ -43,7 +45,9 @@ function InfoStat({
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-sm text-slate-500">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
       <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
     </div>
   );
@@ -64,7 +68,9 @@ function Pill({
       : "bg-slate-100 text-slate-700";
 
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}>
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}
+    >
       {children}
     </span>
   );
@@ -162,6 +168,7 @@ export default function PersonnelPage() {
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
@@ -203,7 +210,9 @@ export default function PersonnelPage() {
     return { total, employees, admins, active };
   }, [items]);
 
-  async function handleCreateEmployee(payload: Omit<EmployeeCreatePayload, "company_id">) {
+  async function handleCreateEmployee(
+    payload: Omit<EmployeeCreatePayload, "company_id">
+  ) {
     if (!access || !companyId) {
       throw { detail: "Current company could not be detected." };
     }
@@ -217,6 +226,7 @@ export default function PersonnelPage() {
       });
 
       await loadEmployees();
+
       setFlash({
         type: "success",
         text: "Employee was created successfully.",
@@ -257,14 +267,20 @@ export default function PersonnelPage() {
     try {
       await Promise.all([
         updateEmployeeUser(access, payload.employee.user.id, payload.userData),
-        updateEmployeeMembership(access, payload.employee.id, payload.membershipData),
+        updateEmployeeMembership(
+          access,
+          payload.employee.id,
+          payload.membershipData
+        ),
       ]);
 
       await loadEmployees();
+
       setFlash({
         type: "success",
         text: "Employee data was saved successfully.",
       });
+
       setEditOpen(false);
       setSelectedEmployee(null);
     } catch (error: any) {
@@ -288,23 +304,26 @@ export default function PersonnelPage() {
 
       {flash ? (
         <div
-          className={`rounded-2xl border px-4 py-3 text-sm ${
+          className={[
+            "rounded-2xl border px-4 py-3 text-sm shadow-sm",
             flash.type === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800",
+          ].join(" ")}
         >
           {flash.text}
         </div>
       ) : null}
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Employees</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-500">
-              See the employees of the current company, filter them quickly,
-              add new people, and edit full employee information.
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+              Employees
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              See the employees of the current company, filter them quickly, add
+              new people, and edit full employee information.
             </p>
           </div>
 
@@ -321,8 +340,8 @@ export default function PersonnelPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <InfoStat label="Total memberships" value={stats.total} />
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <InfoStat label="Total" value={stats.total} />
         <InfoStat label="Employees" value={stats.employees} />
         <InfoStat label="Admins" value={stats.admins} />
         <InfoStat label="Active memberships" value={stats.active} />
@@ -331,7 +350,7 @@ export default function PersonnelPage() {
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div className="xl:col-span-2">
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label className="mb-2 block text-sm font-medium text-slate-700">
               Search
             </label>
             <input
@@ -345,7 +364,7 @@ export default function PersonnelPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label className="mb-2 block text-sm font-medium text-slate-700">
               Role
             </label>
             <select
@@ -363,7 +382,7 @@ export default function PersonnelPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label className="mb-2 block text-sm font-medium text-slate-700">
               Membership status
             </label>
             <select
@@ -380,7 +399,7 @@ export default function PersonnelPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label className="mb-2 block text-sm font-medium text-slate-700">
               Employment status
             </label>
             <select
@@ -402,7 +421,7 @@ export default function PersonnelPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label className="mb-2 block text-sm font-medium text-slate-700">
               Contract type
             </label>
             <select
@@ -430,119 +449,135 @@ export default function PersonnelPage() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
-        {loading ? (
-          <div className="p-8 text-sm text-slate-500">Loading employees...</div>
-        ) : pageError ? (
-          <div className="p-8">
-            <h3 className="text-lg font-semibold text-slate-900">
-              Employees could not be loaded
-            </h3>
-            <p className="mt-2 text-sm text-red-600">{pageError}</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            {filteredItems.length === 0 ? (
-              <div className="p-8 text-sm text-slate-500">
-                No employees match the current filters.
-              </div>
-            ) : (
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                    <th className="px-4 py-3">Person</th>
-                    <th className="px-4 py-3">Employee no.</th>
-                    <th className="px-4 py-3">Role</th>
-                    <th className="px-4 py-3">Department</th>
-                    <th className="px-4 py-3">Job title</th>
-                    <th className="px-4 py-3">Contract</th>
-                    <th className="px-4 py-3">Weekly target</th>
-                    <th className="px-4 py-3">Monthly target</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Actions</th>
+      {loading ? (
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-600">Loading employees...</p>
+        </section>
+      ) : pageError ? (
+        <section className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-red-800">
+            Employees could not be loaded
+          </h2>
+          <p className="mt-2 text-sm text-red-700">{pageError}</p>
+        </section>
+      ) : (
+        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          {filteredItems.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">
+              No employees match the current filters.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-slate-600">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Person</th>
+                    <th className="px-4 py-3 font-medium">Employee no.</th>
+                    <th className="px-4 py-3 font-medium">Role</th>
+                    <th className="px-4 py-3 font-medium">Department</th>
+                    <th className="px-4 py-3 font-medium">Job title</th>
+                    <th className="px-4 py-3 font-medium">Contract</th>
+                    <th className="px-4 py-3 font-medium">Weekly target</th>
+                    <th className="px-4 py-3 font-medium">Monthly target</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Actions</th>
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {filteredItems.map((item) => (
-                    <tr key={item.id} className="align-top">
-                      <td className="px-4 py-4">
-                        <div className="font-medium text-slate-900">
-                          {item.user?.full_name ||
-                            [item.user?.first_name, item.user?.last_name]
-                              .filter(Boolean)
-                              .join(" ") ||
-                            "-"}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          {item.user?.email || "-"}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-400">
-                          {item.user?.public_id || "-"}
-                        </div>
-                      </td>
+                <tbody>
+                  {filteredItems.map((item) => {
+                    const displayName =
+                      item.user?.full_name ||
+                      [item.user?.first_name, item.user?.last_name]
+                        .filter(Boolean)
+                        .join(" ") ||
+                      "-";
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        {item.employee_number || "-"}
-                      </td>
+                    return (
+                      <tr
+                        key={item.id}
+                        className="border-t border-slate-100 align-top"
+                      >
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/dashboard/personnel/${item.id}`}
+                            className="block rounded-xl p-2 transition hover:bg-slate-50"
+                          >
+                            <div className="font-medium text-slate-900">
+                              {displayName}
+                            </div>
+                            <div className="mt-0.5 text-slate-500">
+                              {item.user?.email || "-"}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-400">
+                              {item.user?.public_id || "-"}
+                            </div>
+                          </Link>
+                        </td>
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        <Pill>{item.role}</Pill>
-                      </td>
+                        <td className="px-4 py-3">{item.employee_number || "-"}</td>
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        {item.department || "-"}
-                      </td>
+                        <td className="px-4 py-3">
+                          <Pill>{item.role}</Pill>
+                        </td>
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        {item.job_title || "-"}
-                      </td>
+                        <td className="px-4 py-3">{item.department || "-"}</td>
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        {item.contract_type || "-"}
-                      </td>
+                        <td className="px-4 py-3">{item.job_title || "-"}</td>
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        {item.weekly_target_hours ?? "-"}
-                      </td>
+                        <td className="px-4 py-3">{item.contract_type || "-"}</td>
 
-                      <td className="px-4 py-4 text-sm text-slate-700">
-                        {item.monthly_target_hours ?? "-"}
-                      </td>
+                        <td className="px-4 py-3">
+                          {item.weekly_target_hours ?? "-"}
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <div className="flex flex-col gap-2">
-                          <Pill tone={item.is_active ? "success" : "warning"}>
-                            {item.is_active ? "active" : "inactive"}
-                          </Pill>
+                        <td className="px-4 py-3">
+                          {item.monthly_target_hours ?? "-"}
+                        </td>
 
-                          {item.employment_status ? (
-                            <Pill>{item.employment_status}</Pill>
-                          ) : null}
-                        </div>
-                      </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1">
+                            <Pill tone={item.is_active ? "success" : "warning"}>
+                              {item.is_active ? "active" : "inactive"}
+                            </Pill>
 
-                      <td className="px-4 py-4">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFlash(null);
-                            setSelectedEmployee(item);
-                            setEditOpen(true);
-                          }}
-                          className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                            {item.employment_status ? (
+                              <Pill>{item.employment_status}</Pill>
+                            ) : null}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Link
+                              href={`/dashboard/personnel/${item.id}`}
+                              className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+                            >
+                              Open
+                            </Link>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFlash(null);
+                                setSelectedEmployee(item);
+                                setEditOpen(true);
+                              }}
+                              className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-            )}
-          </div>
-        )}
-      </section>
+            </div>
+          )}
+        </section>
+      )}
 
       <CreateEmployeeModal
         open={createOpen}
@@ -553,13 +588,13 @@ export default function PersonnelPage() {
       />
 
       <EditEmployeeModal
-        open={editOpen}
-        onClose={handleCloseEditModal}
-        employee={selectedEmployee}
-        canManageAdminRole={currentRole === "owner"}
-        loadDetails={handleLoadEmployeeDetails}
-        onSubmit={handleUpdateEmployee}
-      />
+  open={editOpen}
+  employee={selectedEmployee}
+  onClose={handleCloseEditModal}
+  canManageAdminRole={currentRole === "owner" || currentRole === "admin"}
+  loadDetails={handleLoadEmployeeDetails}
+  onSubmit={handleUpdateEmployee}
+/>
     </div>
   );
 }

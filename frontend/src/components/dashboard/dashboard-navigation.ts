@@ -23,7 +23,15 @@ export const dashboardNavigation: DashboardNavItem[] = [
     href: "/dashboard/invoices",
   },
   {
-    label: "Company",
-    href: "/dashboard/company",
+    label: "Messages",
+    href: "/dashboard/messages",
+  },
+  {
+    label: "Schedule",
+    href: "/dashboard/schedule",
+  },
+  {
+    label: "Settings",
+    href: "/dashboard/settings",
   },
 ];

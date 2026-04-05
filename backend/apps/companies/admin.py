@@ -39,6 +39,7 @@ class CompanyAdmin(admin.ModelAdmin):
         "subscription_plan",
         "subscription_status",
         "employee_range",
+        "gps_capture_mode",
         "owner_user",
         "is_active",
         "created_at",
@@ -49,6 +50,9 @@ class CompanyAdmin(admin.ModelAdmin):
         "subscription_plan",
         "subscription_status",
         "employee_range",
+        "gps_capture_mode",
+        "gps_visible_to_admin",
+        "gps_visible_to_employee",
         "is_active",
         "country",
     )
@@ -110,6 +114,14 @@ class CompanyAdmin(admin.ModelAdmin):
                 "subscription_status",
                 "trial_ends_at",
                 "billing_email",
+            )
+        }),
+
+        ("GPS & Standort", {
+            "fields": (
+                "gps_capture_mode",
+                "gps_visible_to_admin",
+                "gps_visible_to_employee",
             )
         }),
 

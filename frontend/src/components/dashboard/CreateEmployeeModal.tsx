@@ -146,9 +146,9 @@ export default function CreateEmployeeModal({
         employment_status: form.employment_status,
         entry_date: form.entry_date || undefined,
         weekly_target_hours:
-          form.weekly_target_hours === "" ? null : Number(form.weekly_target_hours),
+          form.weekly_target_hours === 0 ? null : Number(form.weekly_target_hours),
         monthly_target_hours:
-          form.monthly_target_hours === ""
+          form.monthly_target_hours === 0
             ? null
             : Number(form.monthly_target_hours),
         vacation_days_per_year: Number(form.vacation_days_per_year || 0),

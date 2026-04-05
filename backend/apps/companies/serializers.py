@@ -16,7 +16,6 @@ class CompanyOwnerSerializer(serializers.ModelSerializer):
             "id",
             "public_id",
             "email",
-            "username",
             "first_name",
             "last_name",
             "full_name",
@@ -35,7 +34,6 @@ class CompanyMembershipUserSerializer(serializers.ModelSerializer):
             "id",
             "public_id",
             "email",
-            "username",
             "first_name",
             "last_name",
             "full_name",
@@ -80,6 +78,7 @@ class CompanyListSerializer(serializers.ModelSerializer):
     full_address = serializers.CharField(read_only=True)
     is_trial_active = serializers.BooleanField(read_only=True)
     member_count = serializers.SerializerMethodField()
+    country = serializers.CharField(source="country.code", read_only=True)
 
     class Meta:
         model = Company
@@ -114,6 +113,7 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
     full_address = serializers.CharField(read_only=True)
     is_trial_active = serializers.BooleanField(read_only=True)
     member_count = serializers.SerializerMethodField()
+    country = serializers.CharField(source="country.code", read_only=True)
 
     class Meta:
         model = Company
@@ -142,6 +142,9 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
             "billing_email",
             "timezone",
             "language",
+            "gps_capture_mode",
+            "gps_visible_to_admin",
+            "gps_visible_to_employee",
             "owner_user",
             "is_trial_active",
             "member_count",
@@ -178,6 +181,9 @@ class CompanyCreateSerializer(serializers.ModelSerializer):
             "billing_email",
             "timezone",
             "language",
+            "gps_capture_mode",
+            "gps_visible_to_admin",
+            "gps_visible_to_employee",
         )
 
     def validate_email(self, value):
@@ -216,6 +222,9 @@ class CompanyUpdateSerializer(serializers.ModelSerializer):
             "billing_email",
             "timezone",
             "language",
+            "gps_capture_mode",
+            "gps_visible_to_admin",
+            "gps_visible_to_employee",
             "is_active",
         )
 

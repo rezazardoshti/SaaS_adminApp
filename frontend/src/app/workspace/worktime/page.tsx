@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-
 import { useAuth } from "@/context/AuthContext";
 import {
   buildProjectLabel,
@@ -38,6 +37,15 @@ type MembershipWithTarget = {
   monthly_target_hours?: number | string | null;
 };
 
+type CompanyGpsPolicy = {
+  id: number;
+  public_id?: string;
+  company_name?: string;
+  gps_capture_mode?: "off" | "optional" | "required" | string;
+  gps_visible_to_admin?: boolean;
+  gps_visible_to_employee?: boolean;
+};
+
 type EditFormState = {
   public_id: string;
   project: string;
@@ -47,6 +55,22 @@ type EditFormState = {
   title: string;
   description: string;
   internal_note: string;
+};
+
+type ManualFormState = {
+  project: string;
+  started_at: string;
+  ended_at: string;
+  internal_note: string;
+  break_minutes: string;
+  title: string;
+  description: string;
+};
+
+type StartLocationPayload = {
+  check_in_latitude?: number;
+  check_in_longitude?: number;
+  check_in_accuracy?: number;
 };
 
 function StatCard({
@@ -61,7 +85,7 @@ function StatCard({
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-sm font-medium text-slate-500">{title}</p>
-      <p className="mt-3 break-words text-2xl font-semibold tracking-tight text-slate-900">
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">
         {value}
       </p>
       <p className="mt-2 text-sm leading-6 text-slate-600">{helper}</p>
@@ -85,9 +109,9 @@ function ActionButton({
   return (
     <button
       type="button"
-      disabled={disabled || loading}
       onClick={onClick}
-      className="flex w-full flex-col items-start rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+      disabled={disabled || loading}
+      className="flex min-h-[112px] w-full flex-col rounded-3xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
     >
       <span className="text-base font-semibold text-slate-900">
         {loading ? "Please wait..." : label}
@@ -104,14 +128,13 @@ function MessageBox({
   type: "success" | "error";
   text: string;
 }) {
+  const classes =
+    type === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : "border-rose-200 bg-rose-50 text-rose-800";
+
   return (
-    <div
-      className={`rounded-2xl px-4 py-3 text-sm ${
-        type === "success"
-          ? "border border-green-200 bg-green-50 text-green-700"
-          : "border border-red-200 bg-red-50 text-red-700"
-      }`}
-    >
+    <div className={`rounded-2xl border px-4 py-3 text-sm font-medium ${classes}`}>
       {text}
     </div>
   );
@@ -119,48 +142,37 @@ function MessageBox({
 
 function formatDateLabel(value?: string | null) {
   if (!value) return "-";
-
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-
   return parsed.toLocaleDateString();
 }
 
 function formatTimeLabel(value?: string | null) {
   if (!value) return "-";
-
   const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  return value;
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function toDateTimeLocalValue(value?: string | null) {
   if (!value) return "";
-
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
-
   const year = parsed.getFullYear();
   const month = String(parsed.getMonth() + 1).padStart(2, "0");
   const day = String(parsed.getDate()).padStart(2, "0");
   const hours = String(parsed.getHours()).padStart(2, "0");
   const minutes = String(parsed.getMinutes()).padStart(2, "0");
-
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 function fromDateTimeLocalValue(value: string) {
   if (!value) return null;
-
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-
   return parsed.toISOString();
 }
 
@@ -183,28 +195,23 @@ function getEntryDate(entry: WorktimeEntry) {
 function getEntryDateObject(entry: WorktimeEntry) {
   const raw = getEntryDate(entry);
   if (!raw) return null;
-
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
-
   return parsed;
 }
 
 function getEntryHours(entry: WorktimeEntry) {
   if (entry.duration_hours !== undefined && entry.duration_hours !== null) {
     const asNumber = Number(entry.duration_hours);
-
     if (!Number.isNaN(asNumber)) {
       const totalMinutes = Math.round(asNumber * 60);
       const hours = Math.floor(totalMinutes / 60);
       const minutes = totalMinutes % 60;
-
       return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
         2,
         "0"
       )}`;
     }
-
     return String(entry.duration_hours);
   }
 
@@ -252,6 +259,76 @@ function getSafeAccessToken(access?: string | null) {
   return "";
 }
 
+async function fetchCompanyGpsPolicy(
+  token: string,
+  companyId: number
+): Promise<CompanyGpsPolicy> {
+  const response = await fetch(`${API_BASE_URL}/companies/${companyId}/`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  let data: any = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw data || { detail: "Company settings could not be loaded." };
+  }
+
+  return data as CompanyGpsPolicy;
+}
+
+function getCurrentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      reject(new Error("Geolocation is not supported on this device."));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    });
+  });
+}
+
+async function resolveStartLocation(
+  gpsMode: string | undefined
+): Promise<StartLocationPayload> {
+  const normalized = String(gpsMode || "off").toLowerCase();
+
+  if (normalized === "off") {
+    return {};
+  }
+
+  try {
+    const position = await getCurrentPosition();
+    return {
+      check_in_latitude: Number(position.coords.latitude.toFixed(6)),
+      check_in_longitude: Number(position.coords.longitude.toFixed(6)),
+      check_in_accuracy: Number(position.coords.accuracy.toFixed(2)),
+    };
+  } catch (error: any) {
+    if (normalized === "required") {
+      const message =
+        error?.message ||
+        "Location is required to start work for this company.";
+      throw new Error(message);
+    }
+
+    return {};
+  }
+}
+
 export default function WorkspaceWorktimePage() {
   const { user, membership, company, access: authAccess } = useAuth();
   const access = getSafeAccessToken(authAccess);
@@ -264,14 +341,18 @@ export default function WorkspaceWorktimePage() {
 
   const [resolvedMembership, setResolvedMembership] =
     useState<MembershipWithTarget | null>(membershipFromContext);
+  const [companyPolicy, setCompanyPolicy] = useState<CompanyGpsPolicy | null>(null);
+
   const [entries, setEntries] = useState<WorktimeEntry[]>([]);
   const [activeEntry, setActiveEntry] = useState<WorktimeEntry | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+
   const [pageLoading, setPageLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [actionLoading, setActionLoading] = useState<
     "start" | "end" | "manual" | "edit" | null
   >(null);
+
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [timerSeconds, setTimerSeconds] = useState(0);
@@ -280,7 +361,7 @@ export default function WorkspaceWorktimePage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [editOpenId, setEditOpenId] = useState<string | null>(null);
 
-  const [manualForm, setManualForm] = useState({
+  const [manualForm, setManualForm] = useState<ManualFormState>({
     project: "",
     started_at: "",
     ended_at: "",
@@ -305,17 +386,19 @@ export default function WorkspaceWorktimePage() {
 
   const displayName = useMemo(() => {
     return (
-      user?.full_name?.trim() ||
-      [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim() ||
-      user?.email ||
+      (user as any)?.full_name?.trim() ||
+      [(user as any)?.first_name, (user as any)?.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim() ||
+      (user as any)?.email ||
       "User"
     );
   }, [user]);
 
   const employeeNumber = membershipData?.employee_number || "-";
   const department = membershipData?.department || "-";
-  const companyName =
-    company?.company_name || membershipData?.company_name || "-";
+  const companyName = (company as any)?.company_name || membershipData?.company_name || "-";
 
   const activeProjects = useMemo(() => getActiveProjects(projects), [projects]);
 
@@ -327,7 +410,6 @@ export default function WorkspaceWorktimePage() {
     return entries.filter((entry) => {
       const date = getEntryDateObject(entry);
       if (!date) return false;
-
       return (
         date.getFullYear() === selectedPeriod.year &&
         date.getMonth() + 1 === selectedPeriod.month
@@ -337,9 +419,7 @@ export default function WorkspaceWorktimePage() {
 
   const todaysEntry = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-
-    const activeDate =
-      activeEntry?.work_date || activeEntry?.created_at?.slice(0, 10);
+    const activeDate = activeEntry?.work_date || activeEntry?.created_at?.slice(0, 10);
 
     if (activeEntry && activeDate === today) {
       return activeEntry;
@@ -372,11 +452,9 @@ export default function WorkspaceWorktimePage() {
 
   const monthlyTargetMinutes = useMemo(() => {
     const monthlyTarget = Number(membershipData?.monthly_target_hours);
-
     if (!Number.isNaN(monthlyTarget) && monthlyTarget > 0) {
       return Math.round(monthlyTarget * 60);
     }
-
     return 0;
   }, [membershipData]);
 
@@ -422,13 +500,11 @@ export default function WorkspaceWorktimePage() {
       const diffSeconds = Math.floor(
         (current.getTime() - startedAt.getTime()) / 1000
       );
-
       setTimerSeconds(Math.max(0, diffSeconds));
     }
 
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
-
     return () => clearInterval(interval);
   }, [activeEntry?.started_at]);
 
@@ -453,24 +529,21 @@ export default function WorkspaceWorktimePage() {
           const memberships = (await getMyMemberships(
             access
           )) as MembershipWithTarget[];
-
           activeMembership =
             memberships.find((item) => item.is_active) || memberships[0] || null;
-
           setResolvedMembership(activeMembership);
         }
 
         if (!activeMembership?.company) {
           throw {
-            detail:
-              "Company or employee membership is missing for this account.",
+            detail: "Company or employee membership is missing for this account.",
           };
         }
 
         const companyPublicId =
-          company?.public_id || activeMembership.company_public_id;
+          (company as any)?.public_id || activeMembership.company_public_id;
 
-        const [entriesResponse, activeResponse, projectsResponse] =
+        const [entriesResponse, activeResponse, projectsResponse, policyResponse] =
           await Promise.all([
             getMyWorktimeEntries({
               token: access,
@@ -480,14 +553,14 @@ export default function WorkspaceWorktimePage() {
               token: access,
               companyId: activeMembership.company,
             }),
-            companyPublicId
-              ? getProjects(access, companyPublicId)
-              : Promise.resolve([]),
+            companyPublicId ? getProjects(access, companyPublicId) : Promise.resolve([]),
+            fetchCompanyGpsPolicy(access, activeMembership.company),
           ]);
 
         setEntries(getWorktimeResults(entriesResponse));
         setActiveEntry(activeResponse || null);
         setProjects(getProjectResults(projectsResponse as any));
+        setCompanyPolicy(policyResponse);
       } catch (error: any) {
         setErrorMessage(error?.detail || "Worktime data could not be loaded.");
       } finally {
@@ -497,7 +570,7 @@ export default function WorkspaceWorktimePage() {
         setAuthReady(true);
       }
     },
-    [access, company?.public_id, membershipData]
+    [access, company, membershipData]
   );
 
   useEffect(() => {
@@ -536,9 +609,7 @@ export default function WorkspaceWorktimePage() {
     }
 
     if (!membershipData?.company || !membershipData?.id) {
-      setErrorMessage(
-        "Company or employee membership is missing for this account."
-      );
+      setErrorMessage("Company or employee membership is missing for this account.");
       return;
     }
 
@@ -552,19 +623,34 @@ export default function WorkspaceWorktimePage() {
       setErrorMessage("");
       setSuccessMessage("");
 
+      const policy =
+        companyPolicy || (await fetchCompanyGpsPolicy(access, membershipData.company));
+      setCompanyPolicy(policy);
+
+      const gpsMode = String(policy?.gps_capture_mode || "off").toLowerCase();
+      const locationPayload = await resolveStartLocation(gpsMode);
+
       await startWork(access, {
         company: membershipData.company,
         employee_membership: membershipData.id,
         project: Number(selectedProjectId),
+        ...locationPayload,
       });
 
-      setSuccessMessage("Workday started successfully.");
+      if (gpsMode === "required") {
+        setSuccessMessage("Workday started successfully with GPS location.");
+      } else if (gpsMode === "optional" && locationPayload.check_in_latitude) {
+        setSuccessMessage("Workday started successfully. GPS location was saved.");
+      } else {
+        setSuccessMessage("Workday started successfully.");
+      }
+
       await loadWorktimeData(false);
     } catch (error: any) {
       if (Array.isArray(error?.non_field_errors) && error.non_field_errors[0]) {
         setErrorMessage(error.non_field_errors[0]);
       } else {
-        setErrorMessage(error?.detail || "Start work failed.");
+        setErrorMessage(error?.message || error?.detail || "Start work failed.");
       }
     } finally {
       setActionLoading(null);
@@ -607,9 +693,7 @@ export default function WorkspaceWorktimePage() {
     }
 
     if (!membershipData?.company || !membershipData?.id) {
-      setErrorMessage(
-        "Company or employee membership is missing for this account."
-      );
+      setErrorMessage("Company or employee membership is missing for this account.");
       return;
     }
 
@@ -655,7 +739,6 @@ export default function WorkspaceWorktimePage() {
       });
 
       let data: any = null;
-
       try {
         data = await response.json();
       } catch {
@@ -688,10 +771,7 @@ export default function WorkspaceWorktimePage() {
         setErrorMessage(error.ended_at[0]);
       } else if (error?.work_date?.[0]) {
         setErrorMessage(error.work_date[0]);
-      } else if (
-        Array.isArray(error?.non_field_errors) &&
-        error.non_field_errors[0]
-      ) {
+      } else if (Array.isArray(error?.non_field_errors) && error.non_field_errors[0]) {
         setErrorMessage(error.non_field_errors[0]);
       } else {
         setErrorMessage(error?.detail || "Manual entry creation failed.");
@@ -774,7 +854,6 @@ export default function WorkspaceWorktimePage() {
       );
 
       let data: any = null;
-
       try {
         data = await response.json();
       } catch {
@@ -811,100 +890,121 @@ export default function WorkspaceWorktimePage() {
 
   const canStart = !activeEntry && !pageLoading;
   const canEnd = !!activeEntry && !pageLoading;
+  const gpsModeLabel = String(companyPolicy?.gps_capture_mode || "off").toLowerCase();
 
   if (!access && authReady) {
     return (
-      <div className="space-y-6">
-        <section className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-sm sm:p-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-red-700">
-            Working time
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
+      <div className="space-y-4">
+        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
+          Working time
+        </p>
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
             Time tracking
           </h1>
-          <p className="mt-4 text-sm leading-7 text-red-700">
+          <p className="mt-4 text-slate-600">
             Anmeldedaten fehlen. Bitte melde dich neu an.
           </p>
-        </section>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+    <div className="space-y-8">
+      <div>
         <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
           Working time
         </p>
-
         <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
           Time tracking for {displayName}
         </h1>
-
-        <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600 sm:text-base">
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
           Start and end your workday, review your current status, and keep your
           daily attendance organized in one place.
         </p>
-      </section>
+      </div>
 
-      {successMessage ? (
-        <MessageBox type="success" text={successMessage} />
-      ) : null}
-
+      {successMessage ? <MessageBox type="success" text={successMessage} /> : null}
       {errorMessage ? <MessageBox type="error" text={errorMessage} /> : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 lg:grid-cols-3">
         <StatCard
-          title="Current status"
-          value={pageLoading ? "Loading..." : currentStatus}
-          helper="Shows whether you currently have an active work session."
+          title="Company"
+          value={companyName}
+          helper={`Department: ${department}`}
         />
         <StatCard
-          title="Today"
-          value={pageLoading ? "Loading..." : todayWorked}
-          helper="Your worked time for today."
-        />
-        <StatCard
-          title="Employee number"
+          title="Employee No."
           value={employeeNumber}
-          helper="Loaded from your active company membership."
+          helper={`Status: ${String(currentStatus).toUpperCase()}`}
         />
         <StatCard
-          title="Department"
-          value={department}
-          helper="Your current department inside the company."
+          title="GPS policy"
+          value={gpsModeLabel}
+          helper={
+            gpsModeLabel === "required"
+              ? "Location is required when starting work."
+              : gpsModeLabel === "optional"
+              ? "Location is sent only when the browser allows it."
+              : "Location is not used when starting work."
+          }
         />
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatCard
-          title="Monthly target"
-          value={formatMinutesToHours(monthlyTargetMinutes)}
-          helper="Soll-Stunden / Monat from company membership."
+      <section className="grid gap-4 lg:grid-cols-3">
+        <ActionButton
+          label="Start workday"
+          helper="Begin a new running entry for the selected project."
+          disabled={!canStart || !selectedProjectId}
+          onClick={handleStartWork}
+          loading={actionLoading === "start"}
         />
-        <StatCard
-          title="Approved hours"
-          value={formatMinutesToHours(approvedMinutesForSelectedMonth)}
-          helper="Only approved hours from the selected month."
+        <ActionButton
+          label="End workday"
+          helper="Stop the current running entry and submit it."
+          disabled={!canEnd}
+          onClick={handleEndWork}
+          loading={actionLoading === "end"}
         />
-        <StatCard
-          title="Overtime"
-          value={buildOvertimeLabel(overtimeMinutes)}
-          helper="Approved hours minus monthly target."
+        <ActionButton
+          label={manualOpen ? "Close manual entry" : "Add manual entry"}
+          helper="Use manual entry only when you forgot to start or stop your day."
+          disabled={pageLoading}
+          onClick={() => setManualOpen((prev) => !prev)}
         />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
-            Daily actions
-          </h2>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-5 lg:grid-cols-4">
+          <StatCard
+            title="Today worked"
+            value={todayWorked}
+            helper={
+              activeEntry
+                ? `Started at ${formatTimeLabel(activeEntry.started_at)}`
+                : "No active session"
+            }
+          />
+          <StatCard
+            title="Live timer"
+            value={activeEntry ? formatSecondsAsHHMMSS(timerSeconds) : "00:00:00"}
+            helper="Updates every second while a timer is running."
+          />
+          <StatCard
+            title="Approved this month"
+            value={formatMinutesToHours(approvedMinutesForSelectedMonth)}
+            helper={`Target: ${formatMinutesToHours(monthlyTargetMinutes)}`}
+          />
+          <StatCard
+            title="Balance"
+            value={buildOvertimeLabel(overtimeMinutes)}
+            helper="Approved hours minus monthly target."
+          />
+        </div>
 
-          <p className="mt-3 text-sm leading-7 text-slate-600">
-            Select a project before starting your workday.
-          </p>
-
-          <div className="mt-6">
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
               Project
             </label>
@@ -923,95 +1023,36 @@ export default function WorkspaceWorktimePage() {
             </select>
           </div>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <ActionButton
-              label="Start work"
-              helper="Begin your workday for the selected project."
-              disabled={!canStart || !selectedProjectId}
-              loading={actionLoading === "start"}
-              onClick={handleStartWork}
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">
+              Selected month
+            </label>
+            <input
+              type="month"
+              value={selectedMonthValue}
+              onChange={(e) => setSelectedMonthValue(e.target.value)}
+              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
             />
-
-            <ActionButton
-              label="End work"
-              helper="Finish your current workday and close the active entry."
-              disabled={!canEnd}
-              loading={actionLoading === "end"}
-              onClick={handleEndWork}
-            />
-          </div>
-
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={() => setManualOpen((prev) => !prev)}
-              className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              {manualOpen ? "Close manual entry" : "Add manual entry"}
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
-            Current summary
-          </h2>
-
-          <div className="mt-5 space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-medium text-slate-500">Company</p>
-              <p className="mt-2 text-base font-semibold text-slate-900">
-                {companyName}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-medium text-slate-500">
-                Today&apos;s session
-              </p>
-              <p className="mt-2 text-base font-semibold text-slate-900">
-                {activeEntry
-                  ? `Started at ${formatTimeLabel(activeEntry.started_at)}`
-                  : "No active session"}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-medium text-slate-500">Live timer</p>
-              <p className="mt-2 text-base font-semibold text-slate-900">
-                {activeEntry ? formatSecondsAsHHMMSS(timerSeconds) : "00:00:00"}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-medium text-slate-500">Selected period</p>
-              <p className="mt-2 text-base font-semibold text-slate-900">
-                {selectedMonthValue}
-              </p>
-            </div>
           </div>
         </div>
       </section>
 
       {manualOpen ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="max-w-4xl">
+          <div className="mb-6">
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
               Manual entry
             </p>
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
               Add a manual worktime entry
             </h2>
-            <p className="mt-3 text-sm leading-7 text-slate-600">
+            <p className="mt-2 text-sm leading-7 text-slate-600">
               Use this only when you forgot to start or stop your workday. A
               comment is required.
             </p>
           </div>
 
-          <form
-            onSubmit={handleManualSubmit}
-            className="mt-6 grid gap-5 lg:grid-cols-2"
-          >
+          <form onSubmit={handleManualSubmit} className="grid gap-4 lg:grid-cols-2">
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
                 Project
@@ -1019,10 +1060,7 @@ export default function WorkspaceWorktimePage() {
               <select
                 value={manualForm.project}
                 onChange={(e) =>
-                  setManualForm((prev) => ({
-                    ...prev,
-                    project: e.target.value,
-                  }))
+                  setManualForm((prev) => ({ ...prev, project: e.target.value }))
                 }
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
                 required
@@ -1041,8 +1079,6 @@ export default function WorkspaceWorktimePage() {
                 Break minutes
               </label>
               <input
-                type="number"
-                min="0"
                 value={manualForm.break_minutes}
                 onChange={(e) =>
                   setManualForm((prev) => ({
@@ -1095,13 +1131,9 @@ export default function WorkspaceWorktimePage() {
                 Title
               </label>
               <input
-                type="text"
                 value={manualForm.title}
                 onChange={(e) =>
-                  setManualForm((prev) => ({
-                    ...prev,
-                    title: e.target.value,
-                  }))
+                  setManualForm((prev) => ({ ...prev, title: e.target.value }))
                 }
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
                 placeholder="Optional short title"
@@ -1113,7 +1145,6 @@ export default function WorkspaceWorktimePage() {
                 Description
               </label>
               <input
-                type="text"
                 value={manualForm.description}
                 onChange={(e) =>
                   setManualForm((prev) => ({
@@ -1131,6 +1162,7 @@ export default function WorkspaceWorktimePage() {
                 Comment
               </label>
               <textarea
+                rows={4}
                 value={manualForm.internal_note}
                 onChange={(e) =>
                   setManualForm((prev) => ({
@@ -1138,7 +1170,6 @@ export default function WorkspaceWorktimePage() {
                     internal_note: e.target.value,
                   }))
                 }
-                rows={4}
                 required
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
                 placeholder="Explain why this entry is being added manually."
@@ -1151,9 +1182,7 @@ export default function WorkspaceWorktimePage() {
                 disabled={actionLoading === "manual"}
                 className="inline-flex items-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {actionLoading === "manual"
-                  ? "Saving..."
-                  : "Save manual entry"}
+                {actionLoading === "manual" ? "Saving..." : "Save manual entry"}
               </button>
 
               <button
@@ -1185,302 +1214,225 @@ export default function WorkspaceWorktimePage() {
             <h2 className="text-xl font-semibold tracking-tight text-slate-900">
               Recent activity
             </h2>
-
             <p className="mt-2 text-sm leading-7 text-slate-600">
               Choose a month to review your worktime history.
             </p>
           </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="w-full sm:min-w-[220px]">
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Month
-              </label>
-              <input
-                type="month"
-                value={selectedMonthValue}
-                onChange={(e) => setSelectedMonthValue(e.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => loadWorktimeData(true)}
-              disabled={pageLoading}
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pageLoading ? "Refreshing..." : "Refresh"}
-            </button>
-          </div>
         </div>
 
-        <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200">
-          <div className="overflow-x-auto">
-            <table className="min-w-full bg-white">
-              <thead className="bg-slate-50">
+        <div className="mt-6 overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead>
+              <tr className="text-left text-sm font-semibold text-slate-700">
+                <th className="px-3 py-3">Date</th>
+                <th className="px-3 py-3">Project</th>
+                <th className="px-3 py-3">Start</th>
+                <th className="px-3 py-3">End</th>
+                <th className="px-3 py-3">Break</th>
+                <th className="px-3 py-3">Hours</th>
+                <th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
+              {filteredEntries.length === 0 ? (
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Date
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Type
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Project
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Start
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    End
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Break
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Total
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Comment
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
-                    Action
-                  </th>
+                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
+                    {pageLoading ? "Loading..." : "No worktime entries found."}
+                  </td>
                 </tr>
-              </thead>
+              ) : (
+                filteredEntries.map((entry) => {
+                  const editable =
+                    String(entry.status || "").toLowerCase() === "rejected";
 
-              <tbody>
-                {pageLoading ? (
-                  <tr>
-                    <td colSpan={10} className="px-4 py-6 text-sm text-slate-500">
-                      Loading worktime records...
-                    </td>
-                  </tr>
-                ) : filteredEntries.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="px-4 py-6 text-sm text-slate-500">
-                      No worktime records found for the selected month.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredEntries.map((entry) => {
-                    const isEditing = editOpenId === entry.public_id;
-                    const isApproved =
-                      String(entry.status || "").toLowerCase() === "approved";
-                    const isRunning =
-                      String(entry.status || "").toLowerCase() === "running";
-
-                    return (
-                      <React.Fragment key={entry.public_id || String(entry.id)}>
-                        <tr className="border-t border-slate-200">
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {formatDateLabel(getEntryDate(entry))}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {entry.entry_type || "-"}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {entry.project_name || "-"}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {formatTimeLabel(entry.started_at)}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {formatTimeLabel(entry.ended_at)}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {entry.break_minutes ?? 0} min
-                          </td>
-                          <td className="px-4 py-4 text-sm font-medium text-slate-900">
-                            {getEntryHours(entry)}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {entry.internal_note || entry.description || "-"}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
-                            {getEntryStatus(entry, activeEntry?.id)}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-slate-700">
+                  return (
+                    <React.Fragment key={entry.public_id}>
+                      <tr className="align-top">
+                        <td className="px-3 py-3">{formatDateLabel(getEntryDate(entry))}</td>
+                        <td className="px-3 py-3">{entry.project_name || "-"}</td>
+                        <td className="px-3 py-3">{formatTimeLabel(entry.started_at)}</td>
+                        <td className="px-3 py-3">{formatTimeLabel(entry.ended_at)}</td>
+                        <td className="px-3 py-3">{entry.break_minutes ?? 0} min</td>
+                        <td className="px-3 py-3">{getEntryHours(entry)}</td>
+                        <td className="px-3 py-3">
+                          {getEntryStatus(entry, activeEntry?.id)}
+                        </td>
+                        <td className="px-3 py-3">
+                          {editable ? (
                             <button
                               type="button"
-                              disabled={isApproved || isRunning}
                               onClick={() => openEditForm(entry)}
-                              className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                             >
                               Edit
                             </button>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                      </tr>
+
+                      {editOpenId === entry.public_id ? (
+                        <tr>
+                          <td colSpan={8} className="px-3 pb-4">
+                            <form
+                              onSubmit={handleEditSubmit}
+                              className="mt-2 grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-2"
+                            >
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  Project
+                                </label>
+                                <select
+                                  value={editForm.project}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      project: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                >
+                                  <option value="">Select a project</option>
+                                  {activeProjects.map((project) => (
+                                    <option key={project.id} value={project.id}>
+                                      {buildProjectLabel(project)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  Break minutes
+                                </label>
+                                <input
+                                  value={editForm.break_minutes}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      break_minutes: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  Start time
+                                </label>
+                                <input
+                                  type="datetime-local"
+                                  value={editForm.started_at}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      started_at: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                  required
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  End time
+                                </label>
+                                <input
+                                  type="datetime-local"
+                                  value={editForm.ended_at}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      ended_at: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                  required
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  Title
+                                </label>
+                                <input
+                                  value={editForm.title}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      title: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  Description
+                                </label>
+                                <input
+                                  value={editForm.description}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      description: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                />
+                              </div>
+
+                              <div className="lg:col-span-2">
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  Comment
+                                </label>
+                                <textarea
+                                  rows={4}
+                                  value={editForm.internal_note}
+                                  onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                      ...prev,
+                                      internal_note: e.target.value,
+                                    }))
+                                  }
+                                  required
+                                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+                                  placeholder="Explain what was changed."
+                                />
+                              </div>
+
+                              <div className="lg:col-span-2 flex flex-wrap gap-3">
+                                <button
+                                  type="submit"
+                                  disabled={actionLoading === "edit"}
+                                  className="inline-flex items-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {actionLoading === "edit" ? "Saving..." : "Save changes"}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={closeEditForm}
+                                  className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
                           </td>
                         </tr>
-
-                        {isEditing ? (
-                          <tr className="border-t border-slate-100 bg-slate-50/70">
-                            <td colSpan={10} className="px-4 py-5">
-                              <form
-                                onSubmit={handleEditSubmit}
-                                className="grid gap-4 lg:grid-cols-2"
-                              >
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Project
-                                  </label>
-                                  <select
-                                    value={editForm.project}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        project: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                  >
-                                    <option value="">Select a project</option>
-                                    {activeProjects.map((project) => (
-                                      <option key={project.id} value={project.id}>
-                                        {buildProjectLabel(project)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Break minutes
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    value={editForm.break_minutes}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        break_minutes: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Start time
-                                  </label>
-                                  <input
-                                    type="datetime-local"
-                                    value={editForm.started_at}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        started_at: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    End time
-                                  </label>
-                                  <input
-                                    type="datetime-local"
-                                    value={editForm.ended_at}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        ended_at: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Title
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={editForm.title}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        title: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Description
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={editForm.description}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        description: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                  />
-                                </div>
-
-                                <div className="lg:col-span-2">
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Comment
-                                  </label>
-                                  <textarea
-                                    rows={4}
-                                    value={editForm.internal_note}
-                                    onChange={(e) =>
-                                      setEditForm((prev) => ({
-                                        ...prev,
-                                        internal_note: e.target.value,
-                                      }))
-                                    }
-                                    required
-                                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-                                    placeholder="Explain why this worktime entry is being changed."
-                                  />
-                                </div>
-
-                                <div className="lg:col-span-2 flex flex-wrap gap-3">
-                                  <button
-                                    type="submit"
-                                    disabled={actionLoading === "edit"}
-                                    className="inline-flex items-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    {actionLoading === "edit"
-                                      ? "Saving..."
-                                      : "Save changes"}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={closeEditForm}
-                                    className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </form>
-                            </td>
-                          </tr>
-                        ) : null}
-                      </React.Fragment>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

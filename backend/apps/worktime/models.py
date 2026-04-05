@@ -1,6 +1,5 @@
-# apps/worktime/models.py
-
 from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -40,11 +39,13 @@ class WorkTimeEntry(models.Model):
         on_delete=models.CASCADE,
         related_name="worktime_entries",
     )
+
     employee_membership = models.ForeignKey(
         "companies.CompanyMembership",
         on_delete=models.PROTECT,
         related_name="worktime_entries",
     )
+
     project = models.ForeignKey(
         "projects.Project",
         on_delete=models.SET_NULL,
@@ -58,6 +59,7 @@ class WorkTimeEntry(models.Model):
         choices=EntryType.choices,
         default=EntryType.TIMER,
     )
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -67,12 +69,34 @@ class WorkTimeEntry(models.Model):
     work_date = models.DateField()
     started_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
-
     break_minutes = models.PositiveIntegerField(default=0)
 
     title = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
     internal_note = models.TextField(blank=True)
+
+    check_in_latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    check_in_longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    check_in_accuracy = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    check_in_recorded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
 
     submitted_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
@@ -85,6 +109,7 @@ class WorkTimeEntry(models.Model):
         blank=True,
         related_name="approved_worktime_entries",
     )
+
     rejected_by = models.ForeignKey(
         "companies.CompanyMembership",
         on_delete=models.SET_NULL,
@@ -105,6 +130,7 @@ class WorkTimeEntry(models.Model):
             models.Index(fields=("status",)),
             models.Index(fields=("project",)),
             models.Index(fields=("started_at",)),
+            models.Index(fields=("check_in_recorded_at",)),
         ]
         verbose_name = "Work time entry"
         verbose_name_plural = "Work time entries"
@@ -124,6 +150,13 @@ class WorkTimeEntry(models.Model):
     @property
     def duration_hours(self) -> Decimal:
         return Decimal(self.duration_minutes) / Decimal("60.00")
+
+    @property
+    def has_check_in_location(self) -> bool:
+        return (
+            self.check_in_latitude is not None
+            and self.check_in_longitude is not None
+        )
 
     def clean(self):
         errors = {}
@@ -184,6 +217,33 @@ class WorkTimeEntry(models.Model):
         if self.ended_at and self.duration_minutes < 0:
             errors["ended_at"] = "Calculated duration cannot be negative."
 
+        lat_provided = self.check_in_latitude is not None
+        lng_provided = self.check_in_longitude is not None
+
+        if lat_provided != lng_provided:
+            errors["check_in_latitude"] = (
+                "Latitude and longitude must be provided together."
+            )
+            errors["check_in_longitude"] = (
+                "Latitude and longitude must be provided together."
+            )
+
+        if lat_provided:
+            if self.check_in_latitude < Decimal("-90") or self.check_in_latitude > Decimal("90"):
+                errors["check_in_latitude"] = "Latitude must be between -90 and 90."
+
+        if lng_provided:
+            if self.check_in_longitude < Decimal("-180") or self.check_in_longitude > Decimal("180"):
+                errors["check_in_longitude"] = "Longitude must be between -180 and 180."
+
+        if self.check_in_accuracy is not None and self.check_in_accuracy < 0:
+            errors["check_in_accuracy"] = "Accuracy cannot be negative."
+
+        if self.has_check_in_location and not self.check_in_recorded_at:
+            errors["check_in_recorded_at"] = (
+                "check_in_recorded_at is required when check-in GPS is stored."
+            )
+
         if errors:
             raise ValidationError(errors)
 
@@ -193,6 +253,9 @@ class WorkTimeEntry(models.Model):
 
         if self.status == self.Status.SUBMITTED and not self.submitted_at:
             self.submitted_at = timezone.now()
+
+        if self.has_check_in_location and not self.check_in_recorded_at:
+            self.check_in_recorded_at = self.started_at or timezone.now()
 
         super().save(*args, **kwargs)
 

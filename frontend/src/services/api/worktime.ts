@@ -22,6 +22,13 @@ export type WorktimeEntry = {
   title: string;
   description: string;
   internal_note: string;
+
+  check_in_latitude?: string | number | null;
+  check_in_longitude?: string | number | null;
+  check_in_accuracy?: string | number | null;
+  check_in_recorded_at?: string | null;
+  has_check_in_location?: boolean;
+
   submitted_at?: string | null;
   approved_at?: string | null;
   approved_by?: number | null;
@@ -46,6 +53,10 @@ export type StartWorkPayload = {
   title?: string;
   description?: string;
   internal_note?: string;
+
+  check_in_latitude?: number;
+  check_in_longitude?: number;
+  check_in_accuracy?: number;
 };
 
 export type EndWorkPayload = {
@@ -77,7 +88,7 @@ export type WorkTimeEntryUpdatePayload = {
   ended_at?: string | null;
   break_minutes?: number;
   title?: string;
-  status?:string;
+  status?: string;
   description?: string;
   internal_note?: string;
   is_active?: boolean;
@@ -94,7 +105,7 @@ type PaginatedResponse<T> =
   | null
   | undefined;
 
-function buildQuery(params: Record<string, string | number | undefined | null>) {
+function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
   const searchParams = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
@@ -118,29 +129,25 @@ export function getWorktimeResults(
 export function getFirstActiveEntry(entries: WorktimeEntry[]) {
   return (
     entries.find(
-      (entry) =>
-        entry.status === "running" &&
-        entry.is_active &&
-        !entry.ended_at
+      (entry) => entry.status === "running" && entry.is_active && !entry.ended_at
     ) || null
   );
 }
 
 export function formatMinutesToHours(totalMinutes: number): string {
   const minutes = Math.max(0, Math.round(totalMinutes));
-
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
 
-  return `${String(hours).padStart(2, "0")}:${String(
-    remainingMinutes
-  ).padStart(2, "0")}`;
+  return `${String(hours).padStart(2, "0")}:${String(remainingMinutes).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 /**
  * Workspace page helpers
  */
-
 export async function getMyWorktimeEntries(params: {
   token: string;
   companyId?: number;
@@ -193,7 +200,7 @@ export async function startWork(token: string, payload: StartWorkPayload) {
     "POST",
     payload,
     token
-  ) as Promise<WorktimeEntry>;
+  ) as Promise<WorkTimeEntryDetail>;
 }
 
 export async function endWork(
@@ -206,7 +213,7 @@ export async function endWork(
     "POST",
     payload || {},
     token
-  ) as Promise<WorktimeEntry>;
+  ) as Promise<WorkTimeEntryDetail>;
 }
 
 export async function createManualWorktime(
@@ -218,13 +225,12 @@ export async function createManualWorktime(
     "POST",
     payload,
     token
-  ) as Promise<WorktimeEntry>;
+  ) as Promise<WorkTimeEntryDetail>;
 }
 
 /**
  * Shared helpers for admin / personnel page
  */
-
 export async function getWorktimeEntries(params: {
   token: string;
   companyId?: number;

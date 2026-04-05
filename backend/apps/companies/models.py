@@ -53,6 +53,11 @@ class Company(models.Model):
         CANCELED = "canceled", "Gekündigt"
         SUSPENDED = "suspended", "Gesperrt"
 
+    class GpsCaptureMode(models.TextChoices):
+        OFF = "off", "Aus"
+        OPTIONAL = "optional", "Optional"
+        REQUIRED = "required", "Pflicht"
+
     vat_id_validator = RegexValidator(
         regex=r"^[A-Z]{2}[A-Z0-9]{2,20}$",
         message="Bitte eine gültige USt-IdNr. eingeben, z. B. DE123456789.",
@@ -208,6 +213,24 @@ class Company(models.Model):
         verbose_name="Sprache",
     )
 
+    gps_capture_mode = models.CharField(
+        max_length=20,
+        choices=GpsCaptureMode.choices,
+        default=GpsCaptureMode.OFF,
+        verbose_name="GPS-Erfassung",
+        help_text="Steuert, ob GPS beim Arbeitszeit-Start aus, optional oder verpflichtend ist.",
+    )
+
+    gps_visible_to_admin = models.BooleanField(
+        default=True,
+        verbose_name="GPS für Admin sichtbar",
+    )
+
+    gps_visible_to_employee = models.BooleanField(
+        default=True,
+        verbose_name="GPS für Mitarbeiter sichtbar",
+    )
+
     owner_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -244,6 +267,7 @@ class Company(models.Model):
             models.Index(fields=["subscription_status"]),
             models.Index(fields=["is_active"]),
             models.Index(fields=["created_at"]),
+            models.Index(fields=["gps_capture_mode"]),
         ]
 
     def __str__(self):
@@ -308,7 +332,7 @@ class Company(models.Model):
         return self.get_active_memberships().count()
 
     def can_use_feature(self, feature_key: str) -> bool:
-        return True     
+        return True
 
 
 class CompanyMembership(models.Model):
@@ -318,7 +342,7 @@ class CompanyMembership(models.Model):
         EMPLOYEE = "employee", "Employee"
 
     class ContractType(models.TextChoices):
-        FULL_TIME = "full_time", "Vollzeit" 
+        FULL_TIME = "full_time", "Vollzeit"
         PART_TIME = "part_time", "Teilzeit"
         MINI_JOB = "mini_job", "Minijob"
         TEMPORARY = "temporary", "Befristet"
@@ -526,5 +550,3 @@ class CompanyMembership(models.Model):
         if self.role == self.Role.OWNER and self.company.owner_user_id != self.user_id:
             Company.objects.filter(pk=self.company_id).update(owner_user_id=self.user_id)
             self.company.owner_user_id = self.user_id
-
-           

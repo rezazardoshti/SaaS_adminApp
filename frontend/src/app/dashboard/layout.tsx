@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { usePathname } from "next/navigation";
+
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import DashboardShell from "@/components/dashboard/DashboardShell";
 import { useAuth } from "@/context/AuthContext";
@@ -60,6 +61,30 @@ function getPageMeta(pathname: string) {
       title: "Invoices",
       description:
         "Monitor invoice visibility, open items, and finance-related follow-up.",
+    };
+  }
+
+  if (pathname.startsWith("/dashboard/messages")) {
+    return {
+      title: "Messages",
+      description:
+        "Review internal communication, updates, and company-related message history.",
+    };
+  }
+
+  if (pathname.startsWith("/dashboard/schedule")) {
+    return {
+      title: "Schedule",
+      description:
+        "Plan working days, shifts, and operational schedules for your company.",
+    };
+  }
+
+  if (pathname.startsWith("/dashboard/settings")) {
+    return {
+      title: "Settings",
+      description:
+        "Manage workspace preferences, account options, and company-related settings.",
     };
   }
 

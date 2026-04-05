@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -26,6 +28,7 @@ class WorkTimeEntryListSerializer(serializers.ModelSerializer):
         decimal_places=2,
         read_only=True,
     )
+    has_check_in_location = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = WorkTimeEntry
@@ -48,6 +51,7 @@ class WorkTimeEntryListSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "internal_note",
+            "has_check_in_location",
             "is_active",
             "created_at",
             "updated_at",
@@ -73,6 +77,7 @@ class WorkTimeEntryDetailSerializer(serializers.ModelSerializer):
         decimal_places=2,
         read_only=True,
     )
+    has_check_in_location = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = WorkTimeEntry
@@ -95,6 +100,11 @@ class WorkTimeEntryDetailSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "internal_note",
+            "check_in_latitude",
+            "check_in_longitude",
+            "check_in_accuracy",
+            "check_in_recorded_at",
+            "has_check_in_location",
             "submitted_at",
             "approved_at",
             "approved_by",
@@ -120,6 +130,7 @@ class WorkTimeEntryDetailSerializer(serializers.ModelSerializer):
             "updated_at",
             "duration_minutes",
             "duration_hours",
+            "has_check_in_location",
         )
 
     def get_employee_name(self, obj):
@@ -360,12 +371,19 @@ class WorkTimeEntryStartSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "internal_note",
+            "check_in_latitude",
+            "check_in_longitude",
+            "check_in_accuracy",
         )
 
     def validate(self, attrs):
         company = attrs.get("company")
         membership = attrs.get("employee_membership")
         project = attrs.get("project")
+
+        check_in_latitude = attrs.get("check_in_latitude")
+        check_in_longitude = attrs.get("check_in_longitude")
+        check_in_accuracy = attrs.get("check_in_accuracy")
 
         errors = {}
 
@@ -389,6 +407,39 @@ class WorkTimeEntryStartSerializer(serializers.ModelSerializer):
                 "This employee already has a running work time entry."
             ]
 
+        lat_provided = check_in_latitude is not None
+        lng_provided = check_in_longitude is not None
+
+        if lat_provided != lng_provided:
+            errors["check_in_latitude"] = "Latitude and longitude must be provided together."
+            errors["check_in_longitude"] = "Latitude and longitude must be provided together."
+
+        if lat_provided:
+            if check_in_latitude < Decimal("-90") or check_in_latitude > Decimal("90"):
+                errors["check_in_latitude"] = "Latitude must be between -90 and 90."
+
+        if lng_provided:
+            if check_in_longitude < Decimal("-180") or check_in_longitude > Decimal("180"):
+                errors["check_in_longitude"] = "Longitude must be between -180 and 180."
+
+        if check_in_accuracy is not None and check_in_accuracy < 0:
+            errors["check_in_accuracy"] = "Accuracy cannot be negative."
+
+        gps_mode = None
+        if company:
+            gps_mode = getattr(company, "gps_capture_mode", None)
+
+        if gps_mode == "required":
+            if not lat_provided or not lng_provided:
+                errors["non_field_errors"] = [
+                    "GPS location is required to start work time for this company."
+                ]
+
+        if gps_mode == "off":
+            attrs["check_in_latitude"] = None
+            attrs["check_in_longitude"] = None
+            attrs["check_in_accuracy"] = None
+
         if errors:
             raise serializers.ValidationError(errors)
 
@@ -402,6 +453,13 @@ class WorkTimeEntryStartSerializer(serializers.ModelSerializer):
         validated_data["break_minutes"] = 0
         validated_data["entry_type"] = WorkTimeEntry.EntryType.TIMER
         validated_data["status"] = WorkTimeEntry.Status.RUNNING
+
+        if (
+            validated_data.get("check_in_latitude") is not None
+            and validated_data.get("check_in_longitude") is not None
+        ):
+            validated_data["check_in_recorded_at"] = now
+
         return super().create(validated_data)
 
 

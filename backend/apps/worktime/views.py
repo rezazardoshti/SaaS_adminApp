@@ -1,13 +1,11 @@
 from django.db.models import Q
 from django.utils.dateparse import parse_date
-
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from apps.companies.models import CompanyMembership
-
 from .models import WorkTimeEntry
 from .permissions import (
     CanApproveRejectWorkTimeEntry,
@@ -47,10 +45,13 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
 
-        memberships = CompanyMembership.objects.filter(
-            user=user,
-            is_active=True,
-        ).select_related("company")
+        memberships = (
+            CompanyMembership.objects.filter(
+                user=user,
+                is_active=True,
+            )
+            .select_related("company")
+        )
 
         company_ids = list(memberships.values_list("company_id", flat=True))
         queryset = queryset.filter(company_id__in=company_ids)
@@ -84,6 +85,7 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
 
         if selected_company_id and selected_company_id in membership_by_company:
             requester_membership = membership_by_company[selected_company_id]
+
             if requester_membership.role == CompanyMembership.Role.EMPLOYEE:
                 queryset = queryset.filter(employee_membership__user=user)
         else:
@@ -95,8 +97,10 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
             admin_owner_company_ids = [
                 membership.company_id
                 for membership in memberships
-                if membership.role
-                in (CompanyMembership.Role.OWNER, CompanyMembership.Role.ADMIN)
+                if membership.role in (
+                    CompanyMembership.Role.OWNER,
+                    CompanyMembership.Role.ADMIN,
+                )
             ]
 
             employee_q = Q(
@@ -129,9 +133,10 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(work_date__lte=parsed_to)
 
         if is_active is not None:
-            if is_active.lower() in ("true", "1", "yes"):
+            lowered = is_active.lower()
+            if lowered in ("true", "1", "yes"):
                 queryset = queryset.filter(is_active=True)
-            elif is_active.lower() in ("false", "0", "no"):
+            elif lowered in ("false", "0", "no"):
                 queryset = queryset.filter(is_active=False)
 
         if mine and mine.lower() in ("true", "1", "yes"):
@@ -228,8 +233,7 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         return Response(
             {
-                "detail": "Direct creation is not allowed. "
-                "Use the start action to begin work time."
+                "detail": "Direct creation is not allowed. Use the start action to begin work time."
             },
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
@@ -296,8 +300,8 @@ class WorkTimeEntryViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        entry = serializer.instance
 
+        entry = serializer.instance
         response_serializer = WorkTimeEntryDetailSerializer(
             entry,
             context=self.get_serializer_context(),
