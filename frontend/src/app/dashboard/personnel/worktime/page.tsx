@@ -290,14 +290,17 @@ export default function PersonnelWorktimePage() {
       setCurrentRole(activeMembership.role || "");
 
       const [employeeItems, projectResponse] = await Promise.all([
-        getEmployees({
-          token: access,
-          companyId: activeMembership.company,
-        }),
-        activeMembership.company_public_id
-          ? getProjects(access, activeMembership.company_public_id)
-          : Promise.resolve([] as any),
-      ]);
+  getEmployees({
+    token: access,
+    companyId: activeMembership.company,
+  }),
+  activeMembership.company_public_id
+    ? getProjects({
+        token: access,
+        companyPublicId: activeMembership.company_public_id,
+      })
+    : Promise.resolve([] as any),
+]);
 
       setEmployees(employeeItems);
       setProjects(getProjectResults(projectResponse as any));

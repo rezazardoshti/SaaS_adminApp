@@ -31,10 +31,10 @@ export type ProjectItem = {
   customer_name?: string | null;
 
   project_type?: number | null;
+  project_type_id?: number | null;
   project_type_name?: string | null;
 
   site_location?: string | null;
-
   start_date?: string | null;
   end_date?: string | null;
   budget?: string | number | null;
@@ -105,7 +105,20 @@ export type ProjectCreatePayload = {
   is_active?: boolean;
 };
 
-export type ProjectUpdatePayload = Partial<ProjectCreatePayload>;
+export type ProjectUpdatePayload = Partial<{
+  company: number;
+  customer: number;
+  name: string;
+  description: string;
+  project_number: string;
+  project_type: number | null;
+  site_location: string;
+  status: string;
+  start_date: string | null;
+  end_date: string | null;
+  budget: string | number | null;
+  is_active: boolean;
+}>;
 
 function buildQuery(params: Record<string, unknown>) {
   const searchParams = new URLSearchParams();
@@ -150,8 +163,7 @@ export async function getProjects({
     search,
     status,
     project_type: projectTypeId,
-    is_active:
-      typeof isActive === "boolean" ? String(isActive) : isActive,
+    is_active: typeof isActive === "boolean" ? String(isActive) : isActive,
   });
 
   return apiRequest(`/projects/${query}`, "GET", undefined, token);
@@ -161,7 +173,12 @@ export async function getProjectByPublicId(
   token: string,
   publicId: string
 ): Promise<ProjectItem> {
-  return apiRequest(`/projects/${encodeURIComponent(publicId)}/`, "GET", undefined, token);
+  return apiRequest(
+    `/projects/${encodeURIComponent(publicId)}/`,
+    "GET",
+    undefined,
+    token
+  );
 }
 
 export async function createProject(
@@ -205,18 +222,17 @@ export async function getProjectTypes({
   const query = buildQuery({
     company: companyPublicId,
     search,
-    is_active:
-      typeof isActive === "boolean" ? String(isActive) : isActive,
+    is_active: typeof isActive === "boolean" ? String(isActive) : isActive,
   });
 
-  return apiRequest(`/projects/types/${query}`, "GET", undefined, token);
+  return apiRequest(`/projects/project-types/${query}`, "GET", undefined, token);
 }
 
 export async function createProjectType(
   token: string,
   payload: ProjectTypePayload
 ): Promise<ProjectTypeItem> {
-  return apiRequest("/projects/types/", "POST", payload, token);
+  return apiRequest("/projects/project-types/", "POST", payload, token);
 }
 
 export async function updateProjectType(
@@ -224,14 +240,19 @@ export async function updateProjectType(
   id: number,
   payload: Partial<ProjectTypePayload>
 ): Promise<ProjectTypeItem> {
-  return apiRequest(`/projects/types/${id}/`, "PATCH", payload, token);
+  return apiRequest(`/projects/project-types/${id}/`, "PATCH", payload, token);
 }
 
 export async function deleteProjectType(
   token: string,
   id: number
 ): Promise<void> {
-  await apiRequest(`/projects/types/${id}/`, "DELETE", undefined, token);
+  await apiRequest(
+    `/projects/project-types/${id}/`,
+    "DELETE",
+    undefined,
+    token
+  );
 }
 
 export function getActiveProjects(projects: ProjectItem[]) {

@@ -5,7 +5,7 @@ from .models import Project, ProjectPublicIDSequence, ProjectType
 
 @admin.register(ProjectType)
 class ProjectTypeAdmin(admin.ModelAdmin):
-    ordering = ("company", "sort_order", "name")
+    ordering = ("company__company_name", "sort_order", "name")
     list_display = (
         "name",
         "company",
@@ -50,6 +50,9 @@ class ProjectTypeAdmin(admin.ModelAdmin):
             )
         }),
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("company")
 
 
 @admin.register(Project)
@@ -136,6 +139,38 @@ class ProjectAdmin(admin.ModelAdmin):
             )
         }),
     )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("company", "customer", "project_type", "created_by", "updated_by")
+        )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """
+        Filtert project_type im Projektformular möglichst passend nach Firma.
+        Beim Bearbeiten eines bestehenden Projekts werden nur Types der Projekt-Firma gezeigt.
+        Beim Neuanlegen bleiben zunächst alle aktiven sichtbar, bis später optional
+        ein noch strengeres company-basiertes Admin-Form umgesetzt wird.
+        """
+        if db_field.name == "project_type":
+            qs = ProjectType.objects.select_related("company").filter(is_active=True)
+
+            object_id = None
+            if getattr(request, "resolver_match", None):
+                object_id = request.resolver_match.kwargs.get("object_id")
+
+            if object_id:
+                try:
+                    project = Project.objects.select_related("company").get(pk=object_id)
+                    qs = qs.filter(company_id=project.company_id)
+                except Project.DoesNotExist:
+                    pass
+
+            kwargs["queryset"] = qs.order_by("company__company_name", "sort_order", "name")
+
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
         if not obj.created_by:

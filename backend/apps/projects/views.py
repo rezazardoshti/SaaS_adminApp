@@ -13,9 +13,20 @@ from .serializers import (
 )
 
 
-class IsCompanyAdminOrOwner:
-    @staticmethod
-    def check(user, company):
+class CompanyAdminAccessMixin:
+    admin_roles = ("owner", "admin")
+
+    def _admin_company_ids(self, user):
+        if user.is_superuser:
+            return None
+
+        return CompanyMembership.objects.filter(
+            user=user,
+            is_active=True,
+            role__in=self.admin_roles,
+        ).values_list("company_id", flat=True)
+
+    def _is_company_admin(self, user, company):
         if user.is_superuser:
             return True
 
@@ -23,37 +34,37 @@ class IsCompanyAdminOrOwner:
             company=company,
             user=user,
             is_active=True,
-            role__in=["owner", "admin"],
+            role__in=self.admin_roles,
         ).exists()
 
 
-class ProjectTypeViewSet(viewsets.ModelViewSet):
+class ProjectTypeViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ProjectTypeSerializer
 
     def get_queryset(self):
         user = self.request.user
-        queryset = ProjectType.objects.select_related("company").order_by(
-            "sort_order", "name"
+        queryset = (
+            ProjectType.objects.select_related("company")
+            .all()
+            .order_by("sort_order", "name")
         )
 
         company_public_id = self.request.query_params.get("company", "").strip()
-        search = self.request.query_params.get("search", "").strip()
         is_active = self.request.query_params.get("is_active", "").strip().lower()
+        search = self.request.query_params.get("search", "").strip()
 
-        if user.is_superuser:
-            if company_public_id:
-                queryset = queryset.filter(company__public_id=company_public_id)
-        else:
-            admin_company_ids = CompanyMembership.objects.filter(
-                user=user,
-                is_active=True,
-                role__in=["owner", "admin"],
-            ).values_list("company_id", flat=True)
+        if not user.is_superuser:
+            admin_company_ids = self._admin_company_ids(user)
             queryset = queryset.filter(company_id__in=admin_company_ids)
 
-            if company_public_id:
-                queryset = queryset.filter(company__public_id=company_public_id)
+        if company_public_id:
+            queryset = queryset.filter(company__public_id=company_public_id)
+
+        if is_active in {"true", "1", "yes"}:
+            queryset = queryset.filter(is_active=True)
+        elif is_active in {"false", "0", "no"}:
+            queryset = queryset.filter(is_active=False)
 
         if search:
             queryset = queryset.filter(
@@ -63,64 +74,54 @@ class ProjectTypeViewSet(viewsets.ModelViewSet):
                 | Q(company__public_id__icontains=search)
             )
 
-        if is_active in {"true", "1", "yes"}:
-            queryset = queryset.filter(is_active=True)
-        elif is_active in {"false", "0", "no"}:
-            queryset = queryset.filter(is_active=False)
-
         return queryset
 
     def perform_create(self, serializer):
-        user = self.request.user
         company = serializer.validated_data["company"]
 
-        if not IsCompanyAdminOrOwner.check(user, company):
+        if not self._is_company_admin(self.request.user, company):
             raise PermissionDenied(
-                "You cannot create project types for this company."
+                "Only admin/owner of this company can create project types."
             )
 
         serializer.save()
 
     def perform_update(self, serializer):
-        user = self.request.user
         company = serializer.validated_data.get("company", serializer.instance.company)
 
-        if not IsCompanyAdminOrOwner.check(user, company):
+        if not self._is_company_admin(self.request.user, company):
             raise PermissionDenied(
-                "You cannot update project types for this company."
+                "Only admin/owner of this company can update project types."
             )
 
         serializer.save()
 
     def perform_destroy(self, instance):
-        user = self.request.user
-
-        if not IsCompanyAdminOrOwner.check(user, instance.company):
+        if not self._is_company_admin(self.request.user, instance.company):
             raise PermissionDenied(
-                "You cannot delete project types from this company."
-            )
-
-        if instance.projects.exists():
-            raise PermissionDenied(
-                "This project type is already used by existing projects and cannot be deleted."
+                "Only admin/owner of this company can delete project types."
             )
 
         instance.delete()
 
 
-class ProjectViewSet(viewsets.ModelViewSet):
+class ProjectViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "public_id"
 
     def get_queryset(self):
         user = self.request.user
-        queryset = Project.objects.select_related(
-            "company",
-            "customer",
-            "project_type",
-            "created_by",
-            "updated_by",
-        ).order_by("-created_at")
+        queryset = (
+            Project.objects.select_related(
+                "company",
+                "customer",
+                "project_type",
+                "created_by",
+                "updated_by",
+            )
+            .all()
+            .order_by("-created_at")
+        )
 
         company_public_id = self.request.query_params.get("company", "").strip()
         search = self.request.query_params.get("search", "").strip()
@@ -128,18 +129,23 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project_type_id = self.request.query_params.get("project_type", "").strip()
         is_active = self.request.query_params.get("is_active", "").strip().lower()
 
-        if user.is_superuser:
-            if company_public_id:
-                queryset = queryset.filter(company__public_id=company_public_id)
-        else:
-            membership_company_ids = CompanyMembership.objects.filter(
-                user=user,
-                is_active=True,
-            ).values_list("company_id", flat=True)
-            queryset = queryset.filter(company_id__in=membership_company_ids)
+        if not user.is_superuser:
+            admin_company_ids = self._admin_company_ids(user)
+            queryset = queryset.filter(company_id__in=admin_company_ids)
 
-            if company_public_id:
-                queryset = queryset.filter(company__public_id=company_public_id)
+        if company_public_id:
+            queryset = queryset.filter(company__public_id=company_public_id)
+
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+
+        if project_type_id.isdigit():
+            queryset = queryset.filter(project_type_id=int(project_type_id))
+
+        if is_active in {"true", "1", "yes"}:
+            queryset = queryset.filter(is_active=True)
+        elif is_active in {"false", "0", "no"}:
+            queryset = queryset.filter(is_active=False)
 
         if search:
             queryset = queryset.filter(
@@ -152,17 +158,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 | Q(project_type__name__icontains=search)
                 | Q(company__company_name__icontains=search)
             )
-
-        if status_value:
-            queryset = queryset.filter(status=status_value)
-
-        if project_type_id:
-            queryset = queryset.filter(project_type_id=project_type_id)
-
-        if is_active in {"true", "1", "yes"}:
-            queryset = queryset.filter(is_active=True)
-        elif is_active in {"false", "0", "no"}:
-            queryset = queryset.filter(is_active=False)
 
         return queryset
 
@@ -177,16 +172,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = self.request.user
         company = serializer.validated_data["company"]
 
-        if not user.is_superuser:
-            membership_exists = CompanyMembership.objects.filter(
-                company=company,
-                user=user,
-                is_active=True,
-            ).exists()
-            if not membership_exists:
-                raise PermissionDenied(
-                    "You cannot create projects for this company."
-                )
+        if not self._is_company_admin(user, company):
+            raise PermissionDenied(
+                "Only admin/owner of this company can create projects."
+            )
 
         serializer.save(
             created_by=user,
@@ -195,39 +184,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         user = self.request.user
-        company = serializer.validated_data.get(
-            "company",
-            serializer.instance.company,
-        )
+        company = serializer.validated_data.get("company", serializer.instance.company)
 
-        if not user.is_superuser:
-            membership_exists = CompanyMembership.objects.filter(
-                company=company,
-                user=user,
-                is_active=True,
-            ).exists()
-            if not membership_exists:
-                raise PermissionDenied(
-                    "You cannot update projects for this company."
-                )
+        if not self._is_company_admin(user, company):
+            raise PermissionDenied(
+                "Only admin/owner of this company can update projects."
+            )
 
         serializer.save(updated_by=user)
 
     def perform_destroy(self, instance):
-        user = self.request.user
-
-        if user.is_superuser:
-            instance.delete()
-            return
-
-        membership_exists = CompanyMembership.objects.filter(
-            company=instance.company,
-            user=user,
-            is_active=True,
-        ).exists()
-        if not membership_exists:
+        if not self._is_company_admin(self.request.user, instance.company):
             raise PermissionDenied(
-                "You cannot delete projects from this company."
+                "Only admin/owner of this company can delete projects."
             )
 
         instance.delete()

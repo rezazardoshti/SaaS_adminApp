@@ -20,8 +20,8 @@ class ProjectPublicIDSequence(models.Model):
 
 class ProjectType(models.Model):
     """
-    Company-specific choice list for project types.
-    Example values per company:
+    Company-specific project type master data.
+    Example per company:
     - Elektroinstallation
     - Wartung
     - Renovierung
@@ -55,12 +55,19 @@ class ProjectType(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.company.company_name} - {self.name}"
+        company_name = getattr(self.company, "company_name", str(self.company))
+        return f"{company_name} - {self.name}"
 
     def clean(self):
+        super().clean()
         self.name = (self.name or "").strip()
+
         if not self.name:
             raise ValidationError({"name": "Project type name is required."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class Project(models.Model):
@@ -93,7 +100,6 @@ class Project(models.Model):
         blank=True,
     )
 
-    # NEW: company-defined project type
     project_type = models.ForeignKey(
         ProjectType,
         on_delete=models.PROTECT,
@@ -102,7 +108,6 @@ class Project(models.Model):
         blank=True,
     )
 
-    # NEW: project place / location
     site_location = models.CharField(
         max_length=255,
         blank=True,
@@ -148,11 +153,19 @@ class Project(models.Model):
     class Meta:
         db_table = "projects_project"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company", "project_number"],
+                condition=~models.Q(project_number=""),
+                name="uniq_project_number_per_company",
+            )
+        ]
         indexes = [
             models.Index(fields=["public_id"]),
             models.Index(fields=["company", "status"]),
             models.Index(fields=["company", "project_type"]),
             models.Index(fields=["customer"]),
+            models.Index(fields=["company", "is_active"]),
         ]
 
     def __str__(self):
@@ -160,6 +173,15 @@ class Project(models.Model):
         return f"{label} - {self.name}"
 
     def clean(self):
+        super().clean()
+
+        self.name = (self.name or "").strip()
+        self.project_number = (self.project_number or "").strip()
+        self.site_location = (self.site_location or "").strip()
+
+        if not self.name:
+            raise ValidationError({"name": "Project name is required."})
+
         if self.start_date and self.end_date and self.end_date < self.start_date:
             raise ValidationError(
                 {"end_date": "End date cannot be earlier than start date."}

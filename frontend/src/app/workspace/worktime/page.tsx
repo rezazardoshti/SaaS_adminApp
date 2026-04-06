@@ -481,8 +481,11 @@ export default function WorkspaceWorktimePage() {
               companyId: activeMembership.company,
             }),
             companyPublicId
-              ? getProjects(access, companyPublicId)
-              : Promise.resolve([]),
+  ? getProjects({
+      token: access,
+      companyPublicId,
+    })
+  : Promise.resolve([]),
           ]);
 
         setEntries(getWorktimeResults(entriesResponse));
