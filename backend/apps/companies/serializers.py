@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django_countries.serializer_fields import CountryField
 from rest_framework import serializers
 
 from .models import Company, CompanyMembership
@@ -8,7 +9,7 @@ User = get_user_model()
 
 
 class CompanyOwnerSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(read_only=True)
+    full_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -16,7 +17,6 @@ class CompanyOwnerSerializer(serializers.ModelSerializer):
             "id",
             "public_id",
             "email",
-            "username",
             "first_name",
             "last_name",
             "full_name",
@@ -24,10 +24,14 @@ class CompanyOwnerSerializer(serializers.ModelSerializer):
             "is_active",
         )
         read_only_fields = fields
+
+    def get_full_name(self, obj):
+        full_name = f"{obj.first_name or ''} {obj.last_name or ''}".strip()
+        return full_name or obj.email or str(obj.public_id)
 
 
 class CompanyMembershipUserSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(read_only=True)
+    full_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -35,7 +39,6 @@ class CompanyMembershipUserSerializer(serializers.ModelSerializer):
             "id",
             "public_id",
             "email",
-            "username",
             "first_name",
             "last_name",
             "full_name",
@@ -43,6 +46,10 @@ class CompanyMembershipUserSerializer(serializers.ModelSerializer):
             "is_active",
         )
         read_only_fields = fields
+
+    def get_full_name(self, obj):
+        full_name = f"{obj.first_name or ''} {obj.last_name or ''}".strip()
+        return full_name or obj.email or str(obj.public_id)
 
 
 class CompanyMembershipSerializer(serializers.ModelSerializer):
@@ -81,6 +88,9 @@ class CompanyListSerializer(serializers.ModelSerializer):
     is_trial_active = serializers.BooleanField(read_only=True)
     member_count = serializers.SerializerMethodField()
 
+    country = CountryField(required=False)
+    country_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Company
         fields = (
@@ -94,6 +104,7 @@ class CompanyListSerializer(serializers.ModelSerializer):
             "phone",
             "city",
             "country",
+            "country_name",
             "subscription_plan",
             "subscription_status",
             "is_trial_active",
@@ -107,6 +118,9 @@ class CompanyListSerializer(serializers.ModelSerializer):
     def get_member_count(self, obj):
         return obj.memberships.filter(is_active=True).count()
 
+    def get_country_name(self, obj):
+        return str(obj.country) if obj.country else ""
+
 
 class CompanyDetailSerializer(serializers.ModelSerializer):
     owner_user = CompanyOwnerSerializer(read_only=True)
@@ -114,6 +128,9 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
     full_address = serializers.CharField(read_only=True)
     is_trial_active = serializers.BooleanField(read_only=True)
     member_count = serializers.SerializerMethodField()
+
+    country = CountryField(required=False)
+    country_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
@@ -128,6 +145,7 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
             "phone",
             "website",
             "country",
+            "country_name",
             "street",
             "postal_code",
             "city",
@@ -142,6 +160,7 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
             "billing_email",
             "timezone",
             "language",
+            "gps_tracking_mode",
             "owner_user",
             "is_trial_active",
             "member_count",
@@ -155,8 +174,13 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
     def get_member_count(self, obj):
         return obj.memberships.filter(is_active=True).count()
 
+    def get_country_name(self, obj):
+        return str(obj.country) if obj.country else ""
+
 
 class CompanyCreateSerializer(serializers.ModelSerializer):
+    country = CountryField(required=False, allow_blank=True)
+
     class Meta:
         model = Company
         fields = (
@@ -178,6 +202,7 @@ class CompanyCreateSerializer(serializers.ModelSerializer):
             "billing_email",
             "timezone",
             "language",
+            "gps_tracking_mode",
         )
 
     def validate_email(self, value):
@@ -195,9 +220,18 @@ class CompanyCreateSerializer(serializers.ModelSerializer):
 
 
 class CompanyUpdateSerializer(serializers.ModelSerializer):
+    country = CountryField(required=False, allow_blank=True)
+    country_name = serializers.SerializerMethodField(read_only=True)
+    full_address = serializers.CharField(read_only=True)
+    is_trial_active = serializers.BooleanField(read_only=True)
+    owner_user = CompanyOwnerSerializer(read_only=True)
+    member_count = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Company
         fields = (
+            "id",
+            "public_id",
             "company_name",
             "legal_form",
             "industry",
@@ -206,18 +240,48 @@ class CompanyUpdateSerializer(serializers.ModelSerializer):
             "phone",
             "website",
             "country",
+            "country_name",
             "street",
             "postal_code",
             "city",
+            "full_address",
             "vat_id",
             "tax_number",
             "commercial_register",
             "logo",
+            "subscription_plan",
+            "subscription_status",
+            "trial_ends_at",
             "billing_email",
             "timezone",
             "language",
+            "gps_tracking_mode",
+            "owner_user",
+            "is_trial_active",
+            "member_count",
             "is_active",
+            "created_at",
+            "updated_at",
         )
+        read_only_fields = (
+            "id",
+            "public_id",
+            "owner_user",
+            "is_trial_active",
+            "member_count",
+            "full_address",
+            "created_at",
+            "updated_at",
+            "subscription_plan",
+            "subscription_status",
+            "trial_ends_at",
+        )
+
+    def get_country_name(self, obj):
+        return str(obj.country) if obj.country else ""
+
+    def get_member_count(self, obj):
+        return obj.memberships.filter(is_active=True).count()
 
     def validate_email(self, value):
         return value.lower().strip() if value else value

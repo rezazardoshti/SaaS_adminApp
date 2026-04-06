@@ -9,20 +9,34 @@ from .serializers import (
     ProjectCreateUpdateSerializer,
     ProjectDetailSerializer,
     ProjectListSerializer,
+    ProjectTypeListSerializer,
     ProjectTypeSerializer,
 )
 
 
-class CompanyAdminAccessMixin:
+class CompanyAccessMixin:
     admin_roles = ("owner", "admin")
+
+    def _company_membership_queryset(self, user):
+        if user.is_superuser:
+            return CompanyMembership.objects.none()
+
+        return CompanyMembership.objects.filter(
+            user=user,
+            is_active=True,
+        )
+
+    def _accessible_company_ids(self, user):
+        if user.is_superuser:
+            return None
+
+        return self._company_membership_queryset(user).values_list("company_id", flat=True)
 
     def _admin_company_ids(self, user):
         if user.is_superuser:
             return None
 
-        return CompanyMembership.objects.filter(
-            user=user,
-            is_active=True,
+        return self._company_membership_queryset(user).filter(
             role__in=self.admin_roles,
         ).values_list("company_id", flat=True)
 
@@ -37,10 +51,19 @@ class CompanyAdminAccessMixin:
             role__in=self.admin_roles,
         ).exists()
 
+    def _filter_company_param(self, queryset, company_value: str):
+        company_value = (company_value or "").strip()
+        if not company_value:
+            return queryset
 
-class ProjectTypeViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
+        if company_value.isdigit():
+            return queryset.filter(company_id=int(company_value))
+
+        return queryset.filter(company__public_id=company_value)
+
+
+class ProjectTypeViewSet(CompanyAccessMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
-    serializer_class = ProjectTypeSerializer
 
     def get_queryset(self):
         user = self.request.user
@@ -50,7 +73,7 @@ class ProjectTypeViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
             .order_by("sort_order", "name")
         )
 
-        company_public_id = self.request.query_params.get("company", "").strip()
+        company_value = self.request.query_params.get("company", "").strip()
         is_active = self.request.query_params.get("is_active", "").strip().lower()
         search = self.request.query_params.get("search", "").strip()
 
@@ -58,8 +81,7 @@ class ProjectTypeViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
             admin_company_ids = self._admin_company_ids(user)
             queryset = queryset.filter(company_id__in=admin_company_ids)
 
-        if company_public_id:
-            queryset = queryset.filter(company__public_id=company_public_id)
+        queryset = self._filter_company_param(queryset, company_value)
 
         if is_active in {"true", "1", "yes"}:
             queryset = queryset.filter(is_active=True)
@@ -75,6 +97,11 @@ class ProjectTypeViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
             )
 
         return queryset
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ProjectTypeListSerializer
+        return ProjectTypeSerializer
 
     def perform_create(self, serializer):
         company = serializer.validated_data["company"]
@@ -105,7 +132,7 @@ class ProjectTypeViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
         instance.delete()
 
 
-class ProjectViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
+class ProjectViewSet(CompanyAccessMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "public_id"
 
@@ -123,18 +150,17 @@ class ProjectViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
             .order_by("-created_at")
         )
 
-        company_public_id = self.request.query_params.get("company", "").strip()
+        company_value = self.request.query_params.get("company", "").strip()
         search = self.request.query_params.get("search", "").strip()
         status_value = self.request.query_params.get("status", "").strip()
         project_type_id = self.request.query_params.get("project_type", "").strip()
         is_active = self.request.query_params.get("is_active", "").strip().lower()
 
         if not user.is_superuser:
-            admin_company_ids = self._admin_company_ids(user)
-            queryset = queryset.filter(company_id__in=admin_company_ids)
+            accessible_company_ids = self._accessible_company_ids(user)
+            queryset = queryset.filter(company_id__in=accessible_company_ids)
 
-        if company_public_id:
-            queryset = queryset.filter(company__public_id=company_public_id)
+        queryset = self._filter_company_param(queryset, company_value)
 
         if status_value:
             queryset = queryset.filter(status=status_value)
@@ -157,6 +183,7 @@ class ProjectViewSet(CompanyAdminAccessMixin, viewsets.ModelViewSet):
                 | Q(customer__name__icontains=search)
                 | Q(project_type__name__icontains=search)
                 | Q(company__company_name__icontains=search)
+                | Q(company__public_id__icontains=search)
             )
 
         return queryset

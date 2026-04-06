@@ -18,6 +18,13 @@ import {
   type EmployeeMembershipUpdatePayload,
   type EmployeeUserUpdatePayload,
 } from "@/services/api/employees";
+import {
+  getWorktimeEntries,
+  getBestGpsCoordinates,
+  hasGpsLocation,
+  type WorktimeEntry,
+  type GpsCoordinates,
+} from "@/services/api/worktime";
 
 type FilterState = {
   search: string;
@@ -33,6 +40,14 @@ type FlashMessage =
       text: string;
     }
   | null;
+
+type EmployeeGpsMap = Record<
+  number,
+  {
+    entry: WorktimeEntry | null;
+    coords: GpsCoordinates | null;
+  }
+>;
 
 function InfoStat({
   label,
@@ -54,13 +69,15 @@ function Pill({
   tone = "default",
 }: {
   children: React.ReactNode;
-  tone?: "default" | "success" | "warning";
+  tone?: "default" | "success" | "warning" | "danger";
 }) {
   const classes =
     tone === "success"
       ? "bg-emerald-100 text-emerald-700"
       : tone === "warning"
       ? "bg-amber-100 text-amber-700"
+      : tone === "danger"
+      ? "bg-rose-100 text-rose-700"
       : "bg-slate-100 text-slate-700";
 
   return (
@@ -72,6 +89,98 @@ function Pill({
 
 function normalize(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function formatPersonName(item: EmployeeMembershipItem) {
+  return (
+    item.user?.full_name ||
+    [item.user?.first_name, item.user?.last_name].filter(Boolean).join(" ") ||
+    "-"
+  );
+}
+
+function formatCoordinate(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-";
+  return value.toFixed(6);
+}
+
+function formatGpsTimestamp(value?: string | null) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function buildGoogleMapsUrl(latitude?: number | null, longitude?: number | null) {
+  if (typeof latitude !== "number" || typeof longitude !== "number") return "";
+  return `https://www.google.com/maps?q=${latitude},${longitude}`;
+}
+
+function GpsCell({
+  gps,
+}: {
+  gps?: {
+    entry: WorktimeEntry | null;
+    coords: GpsCoordinates | null;
+  };
+}) {
+  if (!gps?.entry || !gps.coords || !hasGpsLocation(gps.entry)) {
+    return (
+      <div className="space-y-2">
+        <Pill tone="warning">No location</Pill>
+        <div className="text-xs text-slate-400">No GPS data available yet</div>
+      </div>
+    );
+  }
+
+  const { coords, entry } = gps;
+  const mapsUrl = buildGoogleMapsUrl(coords.latitude, coords.longitude);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Pill tone="success">GPS available</Pill>
+        <Pill>{entry.status}</Pill>
+      </div>
+
+      <div className="text-xs leading-5 text-slate-600">
+        <div>
+          <span className="font-medium text-slate-700">Lat:</span>{" "}
+          {formatCoordinate(coords.latitude)}
+        </div>
+        <div>
+          <span className="font-medium text-slate-700">Lng:</span>{" "}
+          {formatCoordinate(coords.longitude)}
+        </div>
+        <div>
+          <span className="font-medium text-slate-700">Accuracy:</span>{" "}
+          {typeof coords.accuracy_meters === "number"
+            ? `${Math.round(coords.accuracy_meters)} m`
+            : "-"}
+        </div>
+        <div>
+          <span className="font-medium text-slate-700">Captured:</span>{" "}
+          {formatGpsTimestamp(coords.location_captured_at)}
+        </div>
+      </div>
+
+      {mapsUrl ? (
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Open in Maps
+        </a>
+      ) : null}
+    </div>
+  );
 }
 
 export default function PersonnelPage() {
@@ -90,6 +199,8 @@ export default function PersonnelPage() {
 
   const [companyId, setCompanyId] = useState<number | null>(null);
   const [currentRole, setCurrentRole] = useState("");
+  const [gpsByMembershipId, setGpsByMembershipId] = useState<EmployeeGpsMap>({});
+  const [gpsLoading, setGpsLoading] = useState(false);
 
   const [filters, setFilters] = useState<FilterState>({
     search: "",
@@ -98,6 +209,11 @@ export default function PersonnelPage() {
     employmentStatus: "",
     contractType: "",
   });
+
+  const canSeeGps = useMemo(() => {
+    const role = currentRole.toLowerCase();
+    return role === "owner" || role === "admin";
+  }, [currentRole]);
 
   const loadEmployees = useCallback(async () => {
     if (!access) return;
@@ -167,6 +283,80 @@ export default function PersonnelPage() {
     };
   }, [createOpen, editOpen, loadEmployees]);
 
+  useEffect(() => {
+    async function loadGpsData() {
+      if (!access || !companyId || !canSeeGps || items.length === 0) {
+        setGpsByMembershipId({});
+        return;
+      }
+
+      setGpsLoading(true);
+
+      try {
+        const results = await Promise.all(
+          items.map(async (employee) => {
+            try {
+              const entries = await getWorktimeEntries({
+                token: access,
+                companyId,
+                employeeMembershipId: employee.id,
+              });
+
+              const sorted = [...entries].sort((a, b) => {
+                const aTime = new Date(
+                  a.location_captured_at ||
+                    a.end_location_captured_at ||
+                    a.start_location_captured_at ||
+                    a.updated_at ||
+                    a.created_at
+                ).getTime();
+
+                const bTime = new Date(
+                  b.location_captured_at ||
+                    b.end_location_captured_at ||
+                    b.start_location_captured_at ||
+                    b.updated_at ||
+                    b.created_at
+                ).getTime();
+
+                return bTime - aTime;
+              });
+
+              const latestWithGps =
+                sorted.find((entry) => hasGpsLocation(entry)) || null;
+
+              return {
+                membershipId: employee.id,
+                entry: latestWithGps,
+                coords: latestWithGps ? getBestGpsCoordinates(latestWithGps) : null,
+              };
+            } catch {
+              return {
+                membershipId: employee.id,
+                entry: null,
+                coords: null,
+              };
+            }
+          })
+        );
+
+        const nextMap: EmployeeGpsMap = {};
+        for (const row of results) {
+          nextMap[row.membershipId] = {
+            entry: row.entry,
+            coords: row.coords,
+          };
+        }
+
+        setGpsByMembershipId(nextMap);
+      } finally {
+        setGpsLoading(false);
+      }
+    }
+
+    loadGpsData();
+  }, [access, canSeeGps, companyId, items]);
+
   const filteredItems = useMemo(() => {
     const search = normalize(filters.search);
     if (!search) return items;
@@ -181,6 +371,10 @@ export default function PersonnelPage() {
       const department = normalize(item.department);
       const jobTitle = normalize(item.job_title);
 
+      const gps = gpsByMembershipId[item.id];
+      const lat = normalize(gps?.coords?.latitude);
+      const lng = normalize(gps?.coords?.longitude);
+
       return [
         fullName,
         firstName,
@@ -190,18 +384,24 @@ export default function PersonnelPage() {
         employeeNumber,
         department,
         jobTitle,
+        lat,
+        lng,
       ].some((value) => value.includes(search));
     });
-  }, [filters.search, items]);
+  }, [filters.search, gpsByMembershipId, items]);
 
   const stats = useMemo(() => {
     const total = items.length;
     const employees = items.filter((item) => item.role === "employee").length;
     const admins = items.filter((item) => item.role === "admin").length;
     const active = items.filter((item) => item.is_active).length;
+    const withGps = items.filter((item) => {
+      const gps = gpsByMembershipId[item.id];
+      return gps?.entry && gps.coords && hasGpsLocation(gps.entry);
+    }).length;
 
-    return { total, employees, admins, active };
-  }, [items]);
+    return { total, employees, admins, active, withGps };
+  }, [gpsByMembershipId, items]);
 
   async function handleCreateEmployee(payload: Omit<EmployeeCreatePayload, "company_id">) {
     if (!access || !companyId) {
@@ -304,7 +504,8 @@ export default function PersonnelPage() {
             <h1 className="text-2xl font-semibold text-slate-900">Employees</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-500">
               See the employees of the current company, filter them quickly,
-              add new people, and edit full employee information.
+              add new people, edit employee information, and review the latest
+              GPS position when company GPS is active.
             </p>
           </div>
 
@@ -321,11 +522,12 @@ export default function PersonnelPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <InfoStat label="Total memberships" value={stats.total} />
         <InfoStat label="Employees" value={stats.employees} />
         <InfoStat label="Admins" value={stats.admins} />
         <InfoStat label="Active memberships" value={stats.active} />
+        <InfoStat label="With GPS data" value={stats.withGps} />
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -339,7 +541,7 @@ export default function PersonnelPage() {
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, search: e.target.value }))
               }
-              placeholder="Name, email, employee no., department..."
+              placeholder="Name, email, employee no., department, GPS..."
               className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
             />
           </div>
@@ -458,6 +660,7 @@ export default function PersonnelPage() {
                     <th className="px-4 py-3">Contract</th>
                     <th className="px-4 py-3">Weekly target</th>
                     <th className="px-4 py-3">Monthly target</th>
+                    {canSeeGps ? <th className="px-4 py-3">Latest GPS</th> : null}
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Actions</th>
                   </tr>
@@ -468,11 +671,7 @@ export default function PersonnelPage() {
                     <tr key={item.id} className="align-top">
                       <td className="px-4 py-4">
                         <div className="font-medium text-slate-900">
-                          {item.user?.full_name ||
-                            [item.user?.first_name, item.user?.last_name]
-                              .filter(Boolean)
-                              .join(" ") ||
-                            "-"}
+                          {formatPersonName(item)}
                         </div>
                         <div className="mt-1 text-sm text-slate-500">
                           {item.user?.email || "-"}
@@ -509,6 +708,18 @@ export default function PersonnelPage() {
                       <td className="px-4 py-4 text-sm text-slate-700">
                         {item.monthly_target_hours ?? "-"}
                       </td>
+
+                      {canSeeGps ? (
+                        <td className="px-4 py-4 text-sm text-slate-700">
+                          {gpsLoading && !gpsByMembershipId[item.id] ? (
+                            <div className="text-xs text-slate-400">
+                              Loading GPS...
+                            </div>
+                          ) : (
+                            <GpsCell gps={gpsByMembershipId[item.id]} />
+                          )}
+                        </td>
+                      ) : null}
 
                       <td className="px-4 py-4">
                         <div className="flex flex-col gap-2">

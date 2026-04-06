@@ -53,6 +53,11 @@ class Company(models.Model):
         CANCELED = "canceled", "Gekündigt"
         SUSPENDED = "suspended", "Gesperrt"
 
+    class GpsTrackingMode(models.TextChoices):
+        DISABLED = "disabled", "Disabled"
+        OPTIONAL = "optional", "Optional"
+        REQUIRED = "required", "Required"
+
     vat_id_validator = RegexValidator(
         regex=r"^[A-Z]{2}[A-Z0-9]{2,20}$",
         message="Bitte eine gültige USt-IdNr. eingeben, z. B. DE123456789.",
@@ -208,6 +213,13 @@ class Company(models.Model):
         verbose_name="Sprache",
     )
 
+    gps_tracking_mode = models.CharField(
+        max_length=20,
+        choices=GpsTrackingMode.choices,
+        default=GpsTrackingMode.DISABLED,
+        verbose_name="GPS Tracking Modus",
+    )
+
     owner_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -242,6 +254,7 @@ class Company(models.Model):
             models.Index(fields=["company_name"]),
             models.Index(fields=["subscription_plan"]),
             models.Index(fields=["subscription_status"]),
+            models.Index(fields=["gps_tracking_mode"]),
             models.Index(fields=["is_active"]),
             models.Index(fields=["created_at"]),
         ]
@@ -266,6 +279,22 @@ class Company(models.Model):
         if not self.trial_ends_at:
             return True
         return self.trial_ends_at >= timezone.now()
+
+    @property
+    def is_gps_enabled(self):
+        return self.gps_tracking_mode != self.GpsTrackingMode.DISABLED
+
+    @property
+    def gps_enabled(self):
+        return self.is_gps_enabled
+
+    @property
+    def gps_mode(self):
+        return self.gps_tracking_mode
+
+    @property
+    def gps_status(self):
+        return self.gps_tracking_mode
 
     def clean(self):
         super().clean()
@@ -308,7 +337,7 @@ class Company(models.Model):
         return self.get_active_memberships().count()
 
     def can_use_feature(self, feature_key: str) -> bool:
-        return True     
+        return True
 
 
 class CompanyMembership(models.Model):
@@ -318,7 +347,7 @@ class CompanyMembership(models.Model):
         EMPLOYEE = "employee", "Employee"
 
     class ContractType(models.TextChoices):
-        FULL_TIME = "full_time", "Vollzeit" 
+        FULL_TIME = "full_time", "Vollzeit"
         PART_TIME = "part_time", "Teilzeit"
         MINI_JOB = "mini_job", "Minijob"
         TEMPORARY = "temporary", "Befristet"
@@ -526,5 +555,3 @@ class CompanyMembership(models.Model):
         if self.role == self.Role.OWNER and self.company.owner_user_id != self.user_id:
             Company.objects.filter(pk=self.company_id).update(owner_user_id=self.user_id)
             self.company.owner_user_id = self.user_id
-
-           

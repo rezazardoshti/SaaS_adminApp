@@ -68,6 +68,7 @@ export type ProjectTypeListResponse =
 
 export type GetProjectsParams = {
   token: string;
+  companyId?: number | string;
   companyPublicId?: string;
   search?: string;
   status?: string;
@@ -77,6 +78,7 @@ export type GetProjectsParams = {
 
 export type GetProjectTypesParams = {
   token: string;
+  companyId?: number | string;
   companyPublicId?: string;
   search?: string;
   isActive?: string | boolean;
@@ -152,6 +154,7 @@ export function getProjectTypeResults(
 
 export async function getProjects({
   token,
+  companyId,
   companyPublicId,
   search,
   status,
@@ -159,7 +162,7 @@ export async function getProjects({
   isActive,
 }: GetProjectsParams): Promise<ProjectListResponse> {
   const query = buildQuery({
-    company: companyPublicId,
+    company: companyId ?? companyPublicId,
     search,
     status,
     project_type: projectTypeId,
@@ -215,12 +218,13 @@ export async function deleteProject(
 
 export async function getProjectTypes({
   token,
+  companyId,
   companyPublicId,
   search,
   isActive,
 }: GetProjectTypesParams): Promise<ProjectTypeListResponse> {
   const query = buildQuery({
-    company: companyPublicId,
+    company: companyId ?? companyPublicId,
     search,
     is_active: typeof isActive === "boolean" ? String(isActive) : isActive,
   });

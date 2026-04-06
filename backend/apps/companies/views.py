@@ -4,11 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Company, CompanyMembership
-from .permissions import (
-    HasCompanyAccess,
-    IsCompanyOwner,
-    IsCompanyOwnerOrAdmin,
-)
+from .permissions import IsCompanyOwner, IsCompanyOwnerOrAdmin
 from .serializers import (
     CompanyCreateSerializer,
     CompanyDetailSerializer,
@@ -37,9 +33,18 @@ class CompanyListCreateView(generics.ListCreateAPIView):
         if user.is_superuser:
             return base_queryset.order_by("-created_at")
 
+        manageable_company_ids = CompanyMembership.objects.filter(
+            user=user,
+            is_active=True,
+            role__in=[
+                CompanyMembership.Role.OWNER,
+                CompanyMembership.Role.ADMIN,
+            ],
+        ).values_list("company_id", flat=True)
+
         return (
             base_queryset
-            .filter(memberships__user=user, memberships__is_active=True)
+            .filter(id__in=manageable_company_ids)
             .distinct()
             .order_by("-created_at")
         )
@@ -57,7 +62,7 @@ class CompanyRetrieveUpdateView(generics.RetrieveUpdateAPIView):
     lookup_field = "pk"
 
     def get_queryset(self):
-        return (
+        queryset = (
             Company.objects
             .select_related("owner_user")
             .prefetch_related(
@@ -70,12 +75,24 @@ class CompanyRetrieveUpdateView(generics.RetrieveUpdateAPIView):
             )
         )
 
-    def get_permissions(self):
-        if self.request.method in permissions.SAFE_METHODS:
-            permission_classes = [permissions.IsAuthenticated, HasCompanyAccess]
-        else:
-            permission_classes = [permissions.IsAuthenticated, IsCompanyOwnerOrAdmin]
+        user = self.request.user
 
+        if user.is_superuser:
+            return queryset
+
+        manageable_company_ids = CompanyMembership.objects.filter(
+            user=user,
+            is_active=True,
+            role__in=[
+                CompanyMembership.Role.OWNER,
+                CompanyMembership.Role.ADMIN,
+            ],
+        ).values_list("company_id", flat=True)
+
+        return queryset.filter(id__in=manageable_company_ids)
+
+    def get_permissions(self):
+        permission_classes = [permissions.IsAuthenticated, IsCompanyOwnerOrAdmin]
         return [permission() for permission in permission_classes]
 
     def get_company(self):

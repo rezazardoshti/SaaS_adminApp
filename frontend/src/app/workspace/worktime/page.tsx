@@ -11,18 +11,18 @@ import {
   type ProjectItem,
 } from "@/services/api/projects";
 import {
+  createManualWorktime,
   endWork,
   formatMinutesToHours,
   getMyActiveWorktime,
   getMyWorktimeEntries,
   getWorktimeResults,
   startWork,
+  updateWorktimeEntry,
+  type GpsCoordinates,
   type WorktimeEntry,
 } from "@/services/api/worktime";
 import { getMyMemberships } from "@/services/api/employees";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
 
 type MembershipWithTarget = {
   id: number;
@@ -37,6 +37,8 @@ type MembershipWithTarget = {
   is_active: boolean;
   monthly_target_hours?: number | string | null;
 };
+
+type CompanyGpsMode = "disabled" | "optional" | "required";
 
 type EditFormState = {
   public_id: string;
@@ -252,6 +254,96 @@ function getSafeAccessToken(access?: string | null) {
   return "";
 }
 
+function detectCompanyGpsMode(
+  companyLike: Record<string, unknown> | null | undefined
+): CompanyGpsMode {
+  if (!companyLike) return "disabled";
+
+  const modeCandidates = [
+    companyLike.gps_tracking_mode,
+    companyLike.gps_mode,
+    companyLike.gps_status,
+  ];
+
+  for (const value of modeCandidates) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (!normalized) continue;
+
+    if (["disabled", "inactive", "off", "false", "0"].includes(normalized)) {
+      return "disabled";
+    }
+    if (["optional", "optinal", "allow", "allowed"].includes(normalized)) {
+      return "optional";
+    }
+    if (
+      ["required", "mandatory", "active", "on", "true", "1"].includes(
+        normalized
+      )
+    ) {
+      return "required";
+    }
+  }
+
+  const enabledCandidates = [
+    companyLike.gps_tracking_enabled,
+    companyLike.is_gps_enabled,
+    companyLike.gps_enabled,
+  ];
+
+  for (const value of enabledCandidates) {
+    if (typeof value === "boolean") {
+      return value ? "required" : "disabled";
+    }
+  }
+
+  return "disabled";
+}
+
+function formatGpsText(coords: GpsCoordinates | null) {
+  if (!coords) return "Not captured";
+  return `${coords.latitude?.toFixed(6)}, ${coords.longitude?.toFixed(6)}`;
+}
+
+function getCurrentPosition(): Promise<GpsCoordinates> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      reject(new Error("Geolocation is not supported on this device/browser."));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy_meters: position.coords.accuracy,
+          location_captured_at: new Date().toISOString(),
+        });
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          reject(new Error("Location permission was denied."));
+          return;
+        }
+        if (error.code === error.POSITION_UNAVAILABLE) {
+          reject(new Error("Location information is unavailable."));
+          return;
+        }
+        if (error.code === error.TIMEOUT) {
+          reject(new Error("Location request timed out."));
+          return;
+        }
+        reject(new Error("Location could not be determined."));
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0,
+      }
+    );
+  });
+}
+
 export default function WorkspaceWorktimePage() {
   const { user, membership, company, access: authAccess } = useAuth();
   const access = getSafeAccessToken(authAccess);
@@ -280,6 +372,9 @@ export default function WorkspaceWorktimePage() {
   const [manualOpen, setManualOpen] = useState(false);
   const [editOpenId, setEditOpenId] = useState<string | null>(null);
 
+  const [lastCapturedGps, setLastCapturedGps] =
+    useState<GpsCoordinates | null>(null);
+
   const [manualForm, setManualForm] = useState({
     project: "",
     started_at: "",
@@ -302,6 +397,14 @@ export default function WorkspaceWorktimePage() {
   });
 
   const membershipData = resolvedMembership || membershipFromContext;
+
+  const gpsMode = useMemo<CompanyGpsMode>(() => {
+    return detectCompanyGpsMode((company as Record<string, unknown>) || null);
+  }, [company]);
+
+  const gpsRequired = gpsMode === "required";
+  const gpsOptional = gpsMode === "optional";
+  const gpsEnabled = gpsMode !== "disabled";
 
   const displayName = useMemo(() => {
     return (
@@ -447,18 +550,13 @@ export default function WorkspaceWorktimePage() {
 
         setErrorMessage("");
 
-        let activeMembership = membershipData;
+        const memberships = (await getMyMemberships(
+          access
+        )) as MembershipWithTarget[];
+        const activeMembership =
+          memberships.find((item) => item.is_active) || memberships[0] || null;
 
-        if (!activeMembership?.company) {
-          const memberships = (await getMyMemberships(
-            access
-          )) as MembershipWithTarget[];
-
-          activeMembership =
-            memberships.find((item) => item.is_active) || memberships[0] || null;
-
-          setResolvedMembership(activeMembership);
-        }
+        setResolvedMembership(activeMembership);
 
         if (!activeMembership?.company) {
           throw {
@@ -466,9 +564,6 @@ export default function WorkspaceWorktimePage() {
               "Company or employee membership is missing for this account.",
           };
         }
-
-        const companyPublicId =
-          company?.public_id || activeMembership.company_public_id;
 
         const [entriesResponse, activeResponse, projectsResponse] =
           await Promise.all([
@@ -480,17 +575,30 @@ export default function WorkspaceWorktimePage() {
               token: access,
               companyId: activeMembership.company,
             }),
-            companyPublicId
-  ? getProjects({
-      token: access,
-      companyPublicId,
-    })
-  : Promise.resolve([]),
+            getProjects({
+              token: access,
+              companyId: activeMembership.company,
+            }),
           ]);
+
+        const loadedProjects = getProjectResults(projectsResponse as never[]);
+        const loadedActiveProjects = getActiveProjects(loadedProjects);
 
         setEntries(getWorktimeResults(entriesResponse));
         setActiveEntry(activeResponse || null);
-        setProjects(getProjectResults(projectsResponse as any));
+        setProjects(loadedProjects);
+
+        if (!selectedProjectId && loadedActiveProjects.length > 0) {
+          setSelectedProjectId(String(loadedActiveProjects[0].id));
+        }
+
+        setManualForm((prev) => {
+          if (prev.project || loadedActiveProjects.length === 0) return prev;
+          return {
+            ...prev,
+            project: String(loadedActiveProjects[0].id),
+          };
+        });
       } catch (error: any) {
         setErrorMessage(error?.detail || "Worktime data could not be loaded.");
       } finally {
@@ -500,7 +608,7 @@ export default function WorkspaceWorktimePage() {
         setAuthReady(true);
       }
     },
-    [access, company?.public_id, membershipData]
+    [access, selectedProjectId]
   );
 
   useEffect(() => {
@@ -532,6 +640,28 @@ export default function WorkspaceWorktimePage() {
     }
   }, [activeProjects, selectedProjectId, manualForm.project]);
 
+  async function captureGpsIfNeeded() {
+    if (!gpsEnabled) {
+      return null;
+    }
+
+    try {
+      const coords = await getCurrentPosition();
+      setLastCapturedGps(coords);
+      return coords;
+    } catch (error: any) {
+      if (gpsRequired) {
+        throw {
+          detail:
+            error?.message ||
+            "GPS is required for this company, but your position could not be captured.",
+        };
+      }
+
+      return null;
+    }
+  }
+
   async function handleStartWork() {
     if (!access) {
       setErrorMessage("Anmeldedaten fehlen. Bitte melde dich neu an.");
@@ -555,13 +685,23 @@ export default function WorkspaceWorktimePage() {
       setErrorMessage("");
       setSuccessMessage("");
 
+      const gps = await captureGpsIfNeeded();
+
       await startWork(access, {
         company: membershipData.company,
         employee_membership: membershipData.id,
         project: Number(selectedProjectId),
+        latitude: gps?.latitude ?? null,
+        longitude: gps?.longitude ?? null,
+        accuracy_meters: gps?.accuracy_meters ?? null,
+        location_captured_at: gps?.location_captured_at ?? null,
       });
 
-      setSuccessMessage("Workday started successfully.");
+      setSuccessMessage(
+        gpsEnabled
+          ? `Workday started successfully. GPS: ${formatGpsText(gps)}`
+          : "Workday started successfully."
+      );
       await loadWorktimeData(false);
     } catch (error: any) {
       if (Array.isArray(error?.non_field_errors) && error.non_field_errors[0]) {
@@ -590,9 +730,20 @@ export default function WorkspaceWorktimePage() {
       setErrorMessage("");
       setSuccessMessage("");
 
-      await endWork(access, activeEntry.public_id);
+      const gps = await captureGpsIfNeeded();
 
-      setSuccessMessage("Workday ended successfully.");
+      await endWork(access, activeEntry.public_id, {
+        latitude: gps?.latitude ?? null,
+        longitude: gps?.longitude ?? null,
+        accuracy_meters: gps?.accuracy_meters ?? null,
+        location_captured_at: gps?.location_captured_at ?? null,
+      });
+
+      setSuccessMessage(
+        gpsEnabled
+          ? `Workday ended successfully. GPS: ${formatGpsText(gps)}`
+          : "Workday ended successfully."
+      );
       await loadWorktimeData(false);
     } catch (error: any) {
       setErrorMessage(error?.detail || "End work failed.");
@@ -636,40 +787,30 @@ export default function WorkspaceWorktimePage() {
       setErrorMessage("");
       setSuccessMessage("");
 
-      const response = await fetch(`${API_BASE_URL}/worktime/entries/manual/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${access}`,
-        },
-        body: JSON.stringify({
-          company: membershipData.company,
-          employee_membership: membershipData.id,
-          project: Number(manualForm.project),
-          entry_type: "manual",
-          work_date: manualForm.started_at.slice(0, 10),
-          started_at: fromDateTimeLocalValue(manualForm.started_at),
-          ended_at: fromDateTimeLocalValue(manualForm.ended_at),
-          break_minutes: Number(manualForm.break_minutes || "0"),
-          title: manualForm.title || "",
-          description: manualForm.description || "",
-          internal_note: manualForm.internal_note.trim(),
-        }),
+      const gps = await captureGpsIfNeeded();
+
+      await createManualWorktime(access, {
+        company: membershipData.company,
+        employee_membership: membershipData.id,
+        project: Number(manualForm.project),
+        work_date: manualForm.started_at.slice(0, 10),
+        started_at: fromDateTimeLocalValue(manualForm.started_at) || "",
+        ended_at: fromDateTimeLocalValue(manualForm.ended_at) || "",
+        break_minutes: Number(manualForm.break_minutes || "0"),
+        title: manualForm.title || "",
+        description: manualForm.description || "",
+        internal_note: manualForm.internal_note.trim(),
+        latitude: gps?.latitude ?? null,
+        longitude: gps?.longitude ?? null,
+        accuracy_meters: gps?.accuracy_meters ?? null,
+        location_captured_at: gps?.location_captured_at ?? null,
       });
 
-      let data: any = null;
-
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-
-      if (!response.ok) {
-        throw data || { detail: "Manual entry creation failed." };
-      }
-
-      setSuccessMessage("Manual work entry created successfully.");
+      setSuccessMessage(
+        gpsEnabled
+          ? `Manual work entry created successfully. GPS: ${formatGpsText(gps)}`
+          : "Manual work entry created successfully."
+      );
       setManualOpen(false);
       setManualForm({
         project: activeProjects[0] ? String(activeProjects[0].id) : "",
@@ -755,38 +896,16 @@ export default function WorkspaceWorktimePage() {
       setErrorMessage("");
       setSuccessMessage("");
 
-      const response = await fetch(
-        `${API_BASE_URL}/worktime/entries/${editForm.public_id}/`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${access}`,
-          },
-          body: JSON.stringify({
-            project: editForm.project ? Number(editForm.project) : null,
-            work_date: editForm.started_at.slice(0, 10),
-            started_at: fromDateTimeLocalValue(editForm.started_at),
-            ended_at: fromDateTimeLocalValue(editForm.ended_at),
-            break_minutes: Number(editForm.break_minutes || "0"),
-            title: editForm.title || "",
-            description: editForm.description || "",
-            internal_note: editForm.internal_note.trim(),
-          }),
-        }
-      );
-
-      let data: any = null;
-
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-
-      if (!response.ok) {
-        throw data || { detail: "Update failed." };
-      }
+      await updateWorktimeEntry(access, editForm.public_id, {
+        project: editForm.project ? Number(editForm.project) : null,
+        work_date: editForm.started_at.slice(0, 10),
+        started_at: fromDateTimeLocalValue(editForm.started_at) || undefined,
+        ended_at: fromDateTimeLocalValue(editForm.ended_at),
+        break_minutes: Number(editForm.break_minutes || "0"),
+        title: editForm.title || "",
+        description: editForm.description || "",
+        internal_note: editForm.internal_note.trim(),
+      });
 
       setSuccessMessage("Worktime entry updated successfully.");
       closeEditForm();
@@ -907,6 +1026,20 @@ export default function WorkspaceWorktimePage() {
             Select a project before starting your workday.
           </p>
 
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-sm font-medium text-slate-700">GPS mode</div>
+            <div className="mt-1 text-sm text-slate-600">
+              {gpsMode === "disabled"
+                ? "Disabled for this company"
+                : gpsMode === "optional"
+                ? "Optional for this company"
+                : "Required for this company"}
+            </div>
+            <div className="mt-3 text-xs text-slate-500">
+              Last captured: {formatGpsText(lastCapturedGps)}
+            </div>
+          </div>
+
           <div className="mt-6">
             <label className="mb-2 block text-sm font-medium text-slate-700">
               Project
@@ -917,19 +1050,34 @@ export default function WorkspaceWorktimePage() {
               disabled={!!activeEntry || activeProjects.length === 0}
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100"
             >
-              <option value="">Select a project</option>
+              <option value="">
+                {activeProjects.length === 0
+                  ? "No active project available"
+                  : "Select a project"}
+              </option>
               {activeProjects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {buildProjectLabel(project)}
                 </option>
               ))}
             </select>
+            {activeProjects.length === 0 ? (
+              <p className="mt-2 text-sm text-amber-700">
+                No active project could be loaded for your company.
+              </p>
+            ) : null}
           </div>
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <ActionButton
               label="Start work"
-              helper="Begin your workday for the selected project."
+              helper={
+                gpsRequired
+                  ? "Begin your workday. GPS is required."
+                  : gpsOptional
+                  ? "Begin your workday. GPS will be sent when available."
+                  : "Begin your workday for the selected project."
+              }
               disabled={!canStart || !selectedProjectId}
               loading={actionLoading === "start"}
               onClick={handleStartWork}
@@ -937,7 +1085,13 @@ export default function WorkspaceWorktimePage() {
 
             <ActionButton
               label="End work"
-              helper="Finish your current workday and close the active entry."
+              helper={
+                gpsRequired
+                  ? "Finish your workday. GPS is required."
+                  : gpsOptional
+                  ? "Finish your workday. GPS will be sent when available."
+                  : "Finish your current workday and close the active entry."
+              }
               disabled={!canEnd}
               loading={actionLoading === "end"}
               onClick={handleEndWork}
@@ -987,7 +1141,9 @@ export default function WorkspaceWorktimePage() {
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-medium text-slate-500">Selected period</p>
+              <p className="text-sm font-medium text-slate-500">
+                Selected period
+              </p>
               <p className="mt-2 text-base font-semibold text-slate-900">
                 {selectedMonthValue}
               </p>
@@ -1006,8 +1162,12 @@ export default function WorkspaceWorktimePage() {
               Add a manual worktime entry
             </h2>
             <p className="mt-3 text-sm leading-7 text-slate-600">
-              Use this only when you forgot to start or stop your workday. A
-              comment is required.
+              Use this only when you forgot to start or stop your workday.
+              {gpsRequired
+                ? " GPS is required for this company."
+                : gpsOptional
+                ? " GPS will be included when available."
+                : ""}
             </p>
           </div>
 
